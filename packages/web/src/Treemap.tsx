@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { NodeChange } from './layers';
 import { Application, Graphics } from 'pixi.js';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
 import type { Snapshot, TreeNode } from '@grim-repo/schema';
@@ -19,6 +20,8 @@ interface Props {
   edges: Edge[];
   /** Exploded-view level (0 off, 1 medium, 2 large): tiles keep their size and drift apart (folders far more than files). */
   exploded?: number;
+  /** Changes overlay (rolled up to ancestors); drawn as white glows above the fill, never replacing it. */
+  changes?: Map<string, NodeChange> | null;
   edgeMode: 'imports' | 'cochange';
   selectedId: string | null;
   onSelect: (n: TreeNode | null) => void;
@@ -135,7 +138,7 @@ function explode(root: RNode, k: number) {
   place(root, (root.x0 + root.x1) / 2 + r.cx, (root.y0 + root.y1) / 2 + r.cy);
 }
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = 0 }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = 0, changes = null }: Props) {
   const explodeRef = useRef(exploded); explodeRef.current = exploded;
   const selRef = useRef(selectedId); selRef.current = selectedId;
   const selectCb = useRef(onSelect); selectCb.current = onSelect;
@@ -144,6 +147,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
   if (edgeRef.current.edges !== edges || edgeRef.current.edgeMode !== edgeMode) edgeRef.current = { edges, edgeMode, v: edgeRef.current.v + 1 };
   const pinRef = useRef({ pins, hits }); pinRef.current = { pins, hits };
   useEffect(() => { kick.current(); }, [pins, hits]);
+  const chRef = useRef<{ m: Map<string, NodeChange> | null; max: number }>({ m: null, max: 1 });
+  useEffect(() => {
+    let max = 1;
+    changes?.forEach((v) => { max = Math.max(max, v.a + v.d); });
+    chRef.current = { m: changes, max };
+    kick.current();
+  }, [changes]);
   const paint = useRef({ cur: painter, prev: painter, t0: 0 });
   const hoverCb = useRef(onHover); hoverCb.current = onHover;
   const kick = useRef<() => void>(() => {});
@@ -269,7 +279,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       // coupling filaments + particles, drawn in world space under a camera transform; additive for the neon look
       const eg = new Graphics(), pg = new Graphics();
       eg.blendMode = 'add'; pg.blendMode = 'add';
-      app.stage.addChild(eg, pg);
+      // changes overlay: own layer so the breathing pulse is just an alpha tweak (no geometry rebuild)
+      const cg = new Graphics();
+      app.stage.addChild(cg, eg, pg);
       let hoverNode: RNode | null = null;
       let edgeBuilt = { v: -1, k: 0, x: 0, y: 0, hover: null as RNode | null };
       const litNode = () => hoverNode ?? (selRef.current != null ? byId.get(selRef.current) ?? null : null);
@@ -402,7 +414,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         };
         dirty = false;
 
-        g.clear();
+        g.clear(); cg.clear();
+        const ch = chRef.current; const chLog = Math.log1p(ch.max);
+        const glows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
         const W = app.screen.width, H = app.screen.height;
         let li = 0, pi = 0;
         const cands: { x: number; y: number; maxW: number; area: number; folder: boolean; dim: boolean; text: string }[] = [];
@@ -478,8 +492,15 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
           const covered = { llm: 0, sql: 0 };
           // semantic zoom: hide inner-file structure until the file is big on screen
-          if (n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PY))) {
-            for (const c of n.children) { const r = visit(c); covered.llm += r.llm; covered.sql += r.sql; }
+          const expand = !!n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PY));
+          const cv = ch.m?.get(d.id);
+          if (cv && !intro) {
+            // folders, and files showing their functions, only get a faint border so the eye goes to the leaves
+            const faint = d.kind === 'folder' || (d.kind === 'file' && expand && n.children!.some((c) => ch.m!.has(c.data.id)));
+            glows.push({ x: x0, y: y0, w, h, s: Math.log1p(cv.a + cv.d) / chLog, added: cv.s === 'A', faint });
+          }
+          if (expand) {
+            for (const c of n.children!) { const r = visit(c); covered.llm += r.llm; covered.sql += r.sql; }
           }
           const tot = subHits.get(n)!;
           if (!intro && w >= 8 && h >= 8) {
@@ -498,6 +519,18 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           if (w < MIN_PX || h < MIN_PX) continue;
           g.rect(x0, y0, w, h).fill({ color: 0x64748b, alpha: 0.4 * (1 - eD) }).stroke({ width: 1, color: 0xf87171, alpha: 0.6 * (1 - eD) });
         }
+        // changes overlay: soft halo (layered strokes, alpha falling off) + crisp inner white stroke, strength ~ log(lines)
+        for (const q of glows) {
+          if (q.faint) { cg.rect(q.x + 0.5, q.y + 0.5, Math.max(0, q.w - 1), Math.max(0, q.h - 1)).stroke({ width: 1, color: 0xffffff, alpha: 0.16 }); continue; }
+          const s = 0.3 + 0.7 * q.s, halo = 3 + 7 * s;
+          for (let i = 4; i >= 1; i--) {
+            const o = (halo * i) / 4;
+            cg.rect(q.x - o, q.y - o, q.w + 2 * o, q.h + 2 * o).stroke({ width: halo / 4 + 0.75, color: 0xffffff, alpha: (0.1 + 0.22 * s) * Math.pow(1 - (i - 1) / 4, 1.5) });
+          }
+          cg.rect(q.x + 0.75, q.y + 0.75, Math.max(0, q.w - 1.5), Math.max(0, q.h - 1.5)).stroke({ width: 2, color: 0xffffff, alpha: 0.85 + 0.15 * s });
+          if (q.added && q.w > 10 && q.h > 10) cg.rect(q.x + 4, q.y + 4, q.w - 8, q.h - 8).stroke({ width: 1, color: 0xffffff, alpha: 0.6 }); // added: double stroke
+        }
+        if (el.dataset.changedDrawn !== String(glows.length)) el.dataset.changedDrawn = String(glows.length); // test hook
         // persistent selection highlight
         const sn = selRef.current != null ? byId.get(selRef.current) : undefined;
         if (sn && !intro) {
@@ -527,7 +560,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         for (let i = li; i < labelPool.length; i++) labelPool[i]!.style.display = 'none';
         for (let i = pi; i < pinPool.length; i++) pinPool[i]!.style.display = 'none';
       };
-      app.ticker.add(() => draw(performance.now()));
+      app.ticker.add(() => { const now = performance.now(); draw(now); cg.alpha = 0.85 + 0.15 * Math.sin((now / 2000) * Math.PI * 2); });
       kick.current = () => { dirty = true; };
 
       // ---- interaction ----

@@ -122,6 +122,9 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       await expect.poll(changed, { timeout: 10000 }).toBeGreaterThan(0);
       await expect.poll(() => page.locator('[data-changed-files]').textContent()).toContain('a.ts');
       expect(await page.locator('[data-changed-files]').textContent()).not.toContain('b.ts');
+      // fill layers keep working under the overlay
+      await page.locator('[data-layer="complexity"]').click();
+      await expect.poll(() => page.locator('[data-fill]').getAttribute('data-fill')).toBe('complexity');
       await page.locator('[data-changes-clear]').click();
       await expect.poll(changed).toBe(0);
     } finally {

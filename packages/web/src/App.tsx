@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode, Stage } from '@grim-repo/schema';
 import { StatusBar, stageLoading } from './StatusBar';
 import { LayerDock, type PinState } from './LayerDock';
-import { aggregateChanges, hitCounts, makeChangesPainter, makePainter, type CxOptions, type LayerId } from './layers';
+import { aggregateChanges, hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
 import { ChangesPanel, type ChangeSel } from './ChangesPanel';
 import { Treemap } from './Treemap';
 import { mergeWsSnapshot } from './snapshot';
@@ -60,8 +60,7 @@ export function App() {
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
   const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
-  // the Changes overlay temporarily overrides the fill layer
-  const painter = useMemo(() => (changeAgg && ix ? makeChangesPainter(changeAgg, (id) => ix.byId.get(id)?.kind) : layerPainter), [changeAgg, ix, layerPainter]);
+  const painter = layerPainter; // the Changes overlay is drawn on top by the Treemap; it never replaces the fill
   const changeInfo = (n: TreeNode | null) => {
     if (!n || !changes || !changeAgg || !ix) return null;
     const v = changeAgg.get(n.id);
@@ -179,8 +178,8 @@ export function App() {
   }, []);
 
   return (
-    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0}>
-      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} />}
+    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-fill={layer}>
+      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} changes={changeAgg} />}
       {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
       <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} />
       <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
@@ -191,8 +190,8 @@ export function App() {
         <div className="glass pointer-events-none fixed z-10 max-w-sm rounded-lg px-3 py-2 font-mono text-xs" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <div className="truncate text-cyan-200">{hover.node.path || '/'}{hover.node.kind !== 'file' && hover.node.kind !== 'folder' ? ` › ${hover.node.name}` : ''}</div>
           <div className="mt-0.5 text-slate-400">{hover.node.kind} · {hover.node.sloc.toLocaleString()} SLOC</div>
-          {changeAgg && (() => { const v = changeAgg.get(hover.node.id); return <div className={`mt-0.5 ${v ? (v.s === 'A' ? 'text-emerald-300' : 'text-amber-300') : 'text-slate-500'}`}>selected commits: {v ? `+${v.a} −${v.d}` : 'unchanged'}</div>; })()}
-          {!changeAgg && layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
+          {changeAgg && (() => { const v = changeAgg.get(hover.node.id); return <div className={`mt-0.5 ${v ? 'text-white' : 'text-slate-500'}`}>selected commits: {v ? `${v.s === 'A' ? 'added ' : ''}+${v.a} −${v.d}` : 'unchanged'}</div>; })()}
+          {layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
           {hoverCoupling && (hoverCoupling.inc > 0 || hoverCoupling.out > 0) && <div className="mt-0.5 text-sky-300">imports: {hoverCoupling.out} out · {hoverCoupling.inc} in</div>}
           {hoverCoupling?.top && <div className="mt-0.5 truncate text-fuchsia-300">co-change: {hoverCoupling.top.path} ({Math.round(hoverCoupling.top.conf * 100)}%, {hoverCoupling.top.n} commits)</div>}
           {hoverHits && (hoverHits.llm > 0 || hoverHits.sql > 0) && (
