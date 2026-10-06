@@ -9,6 +9,7 @@ export function buildFileChildren(filePath: string, lines: boolean[], items: Ite
   const make = (it: Item, parentId: string, depth: number): TreeNode => {
     const id = `${parentId}#${it.name}@${it.startLine + 1}`;
     const node: TreeNode = { id, name: it.name, kind: it.kind, path: filePath, sloc: 0, language: lang, startLine: it.startLine + 1, endLine: it.endLine + 1 };
+    if (it.cx != null) node.cx = it.cx;
     for (let l = it.startLine; l <= it.endLine && l < lines.length; l++) owner[l] = node;
     if (it.children.length && depth < 2) node.children = it.children.map((c) => make(c, id, depth + 1));
     return node;

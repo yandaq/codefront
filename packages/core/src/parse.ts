@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import Parser from 'web-tree-sitter';
+import { cognitiveComplexity } from './complexity.js';
 
 const require = createRequire(import.meta.url);
 const wasmDir = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out');
@@ -28,8 +29,11 @@ async function getParser(lang: Lang): Promise<Parser> {
   return p;
 }
 
-export interface Item { kind: 'class' | 'function'; name: string; startLine: number; endLine: number; children: Item[] }
-export interface ParseResult { comments: Array<[number, number]>; items: Item[] }
+export interface Item { kind: 'class' | 'function'; name: string; startLine: number; endLine: number; children: Item[]; cx?: number }
+/** A string literal or call site (0-based lines) for detectors. */
+export interface StrLit { text: string; startLine: number; endLine: number; at?: number }
+export interface CallSite { callee: string; text: string; startLine: number; endLine: number; at?: number }
+export interface ParseResult { comments: Array<[number, number]>; items: Item[]; strings: StrLit[]; calls: CallSite[] }
 
 type N = Parser.SyntaxNode;
 
@@ -58,20 +62,20 @@ function toItem(n: N, depth: number): Item | null {
     if (body && depth < 2) for (const c of body.namedChildren) { const it = toItem(c, depth + 1); if (it) children.push(it); }
     return { kind: 'class', name: nameOf(node, '(anonymous class)'), ...span, children };
   }
-  if (FN_TYPES.has(node.type)) return { kind: 'function', name: nameOf(node, '(anonymous)'), ...span, children: [] };
+  if (FN_TYPES.has(node.type)) return { kind: 'function', name: nameOf(node, '(anonymous)'), ...span, children: [], cx: cognitiveComplexity(node) };
   // const foo = () => {} / class field foo = () => {}
   if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
     const decls = node.namedChildren.filter((c) => c.type === 'variable_declarator');
     if (decls.length === 1) {
       const v = decls[0]!.childForFieldName('value');
-      if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: nameOf(decls[0]!, '(anonymous)'), ...span, children: [] };
+      if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: nameOf(decls[0]!, '(anonymous)'), ...span, children: [], cx: cognitiveComplexity(v) };
       if (v && CLASS_TYPES.has(v.type)) { const it = toItem(v, depth); if (it) { it.name = nameOf(decls[0]!, it.name); Object.assign(it, span); } return it; }
     }
     return null;
   }
   if (node.type === 'public_field_definition' || node.type === 'field_definition') {
     const v = node.childForFieldName('value');
-    if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: (node.childForFieldName('name') ?? node.childForFieldName('property'))?.text ?? '(field)', ...span, children: [] };
+    if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: (node.childForFieldName('name') ?? node.childForFieldName('property'))?.text ?? '(field)', ...span, children: [], cx: cognitiveComplexity(v) };
   }
   return null;
 }
@@ -81,21 +85,38 @@ export async function parseSource(text: string, lang: Lang): Promise<ParseResult
   const tree = parser.parse(text);
   try {
     const comments: Array<[number, number]> = [];
+    const strings: StrLit[] = [];
+    const calls: CallSite[] = [];
     const stack: N[] = [tree.rootNode];
+    const docstrings = new Set<number>();
     while (stack.length) {
       const n = stack.pop()!;
       if (n.type === 'comment') { comments.push([n.startIndex, n.endIndex]); continue; }
       // Python docstrings: expression_statement containing only a string
       if (lang === 'python' && n.type === 'expression_statement' && n.namedChildCount === 1 && n.namedChildren[0]!.type === 'string') {
-        if (!n.previousNamedSibling && (n.parent?.type === 'block' || n.parent?.type === 'module')) comments.push([n.startIndex, n.endIndex]);
+        if (!n.previousNamedSibling && (n.parent?.type === 'block' || n.parent?.type === 'module')) { comments.push([n.startIndex, n.endIndex]); docstrings.add(n.namedChildren[0]!.startIndex); }
+      }
+      if ((n.type === 'string' || n.type === 'template_string') && !docstrings.has(n.startIndex) && n.parent?.type !== 'string') {
+        strings.push({ text: stripQuotes(n.text), startLine: n.startPosition.row, endLine: n.endPosition.row, at: n.startIndex });
+        if (n.type === 'string') continue;
+      }
+      if (n.type === 'call_expression' || n.type === 'call' || n.type === 'new_expression') {
+        const f = n.childForFieldName('function') ?? n.childForFieldName('constructor');
+        if (f) calls.push({ callee: f.text.replace(/\s+/g, '').slice(0, 200), text: n.text.slice(0, 600), startLine: n.startPosition.row, endLine: n.endPosition.row, at: n.startIndex });
       }
       for (const c of n.children) stack.push(c);
     }
     const items: Item[] = [];
     for (const c of tree.rootNode.namedChildren) { const it = toItem(c, 0); if (it) items.push(it); }
-    return { comments, items };
+    const byAt = (a: { at?: number }, b: { at?: number }) => a.at! - b.at!;
+    return { comments, items, strings: strings.sort(byAt), calls: calls.sort(byAt) };
   } finally {
     tree.delete();
     parser.delete();
   }
+}
+
+function stripQuotes(t: string): string {
+  const m = t.match(/^[rbuRBUfF]*('''|"""|'|"|`)([\s\S]*)\1$/);
+  return m ? m[2]! : t;
 }

@@ -14,6 +14,12 @@ export interface TreeNode {
   endLine?: number;
   /** Git metrics (files and aggregated folders). */
   git?: GitMetrics;
+  /** Cognitive complexity: functions = own score; classes/files/folders = max over functions. */
+  cx?: number;
+  /** SLOC-weighted mean cognitive complexity over descendant functions (non-function nodes). */
+  cxMean?: number;
+  /** Fraction (0..1) of instrumented lines covered; undefined = no coverage data. */
+  cov?: number;
   children?: TreeNode[];
 }
 
@@ -36,9 +42,54 @@ export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     startLine: z.number().int().optional(),
     endLine: z.number().int().optional(),
     git: GitMetricsSchema.optional(),
+    cx: z.number().optional(),
+    cxMean: z.number().optional(),
+    cov: z.number().optional(),
     children: z.array(TreeNodeSchema).optional(),
   }),
 );
+
+export const SqlInfoSchema = z.object({ style: z.enum(['raw', 'orm']), op: z.enum(['read', 'write']), tables: z.array(z.string()) });
+export const HitSchema = z.object({
+  kind: z.enum(['llm', 'sql']),
+  rule: z.string(),
+  file: z.string(),
+  startLine: z.number().int(),
+  endLine: z.number().int(),
+  confidence: z.number(),
+  snippet: z.string(),
+  /** Innermost tree node containing the hit (function/class/file, or nearest folder for hidden files). */
+  nodeId: z.string().optional(),
+  sql: SqlInfoSchema.optional(),
+});
+export type Hit = z.infer<typeof HitSchema>;
+
+/** Per-file coverage: line ranges encoded as "1-5,7,9-12" (1-based). */
+export const FileCoverageSchema = z.object({ covered: z.string(), uncovered: z.string() });
+export type FileCoverage = z.infer<typeof FileCoverageSchema>;
+export const CoverageSchema = z.object({ available: z.boolean(), reports: z.array(z.string()), files: z.record(FileCoverageSchema) });
+export type Coverage = z.infer<typeof CoverageSchema>;
+
+export function encodeRanges(lines: number[]): string {
+  const s = [...new Set(lines)].sort((a, b) => a - b);
+  const out: string[] = [];
+  for (let i = 0; i < s.length; ) {
+    let j = i;
+    while (j + 1 < s.length && s[j + 1] === s[j]! + 1) j++;
+    out.push(i === j ? `${s[i]}` : `${s[i]}-${s[j]}`);
+    i = j + 1;
+  }
+  return out.join(',');
+}
+export function decodeRanges(r: string): number[] {
+  const out: number[] = [];
+  for (const part of r.split(',')) {
+    if (!part) continue;
+    const [a, b] = part.split('-').map(Number);
+    for (let l = a!; l <= (b ?? a!); l++) out.push(l);
+  }
+  return out;
+}
 
 export const SnapshotSchema = z.object({
   version: z.literal(1),
@@ -48,13 +99,15 @@ export const SnapshotSchema = z.object({
   root: TreeNodeSchema,
   /** Git history; `available: false` for non-git directories. `commits` are epoch seconds, ascending. */
   git: z.object({ available: z.boolean(), commits: z.array(z.number()), head: z.string().optional() }).optional(),
+  coverage: CoverageSchema.optional(),
+  hits: z.array(HitSchema).optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 
-export const ScanRequestSchema = z.object({ path: z.string().min(1), showDocs: z.boolean().optional() });
+export const ScanRequestSchema = z.object({ path: z.string().min(1), showDocs: z.boolean().optional(), coverageReport: z.string().optional() });
 export type ScanRequest = z.infer<typeof ScanRequestSchema>;
 
-export interface ScanProgress { stage: 'walk' | 'sloc' | 'parse' | 'git' | 'blame' | 'done'; done: number; total: number; root?: string }
+export interface ScanProgress { stage: 'walk' | 'sloc' | 'parse' | 'detect' | 'coverage' | 'git' | 'blame' | 'done'; done: number; total: number; root?: string }
 
 /** Layer update pushed over /api/progress. `values` maps node id -> epoch seconds of last change. */
 export interface LayerUpdate { type: 'layer'; layer: 'age'; root: string; values: Record<string, number>; done: number; total: number }
@@ -72,5 +125,5 @@ export function churnFor(g: GitMetrics | undefined, commits: number[], window: C
   return { commits: n, lines };
 }
 
-/** Placeholder complexity proxy (SLOC) used by Hotspots until M3 cognitive complexity lands. Swap here. */
-export function complexityProxy(n: TreeNode): number { return n.sloc; }
+/** Complexity used by Hotspots: cognitive complexity (max over functions for aggregate nodes). */
+export function complexityOf(n: TreeNode): number { return n.cx ?? 0; }

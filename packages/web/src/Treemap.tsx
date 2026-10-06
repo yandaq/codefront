@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { Application, Graphics } from 'pixi.js';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
 import type { Snapshot, TreeNode } from '@grim-repo/schema';
-import type { Painter } from './layers';
+import type { HitCounts, Painter } from './layers';
+import type { PinState } from './LayerDock';
 
 type RNode = HierarchyRectangularNode<TreeNode>;
 interface Cam { x: number; y: number; k: number }
@@ -12,6 +13,8 @@ interface Props {
   focusRequest: { id: string; n: number } | null;
   painter: Painter;
   onHover: (h: { node: TreeNode; x: number; y: number } | null) => void;
+  pins: PinState;
+  hits: Map<string, HitCounts>;
 }
 const FADE_MS = 400;
 
@@ -39,7 +42,9 @@ function mix(a: number, b: number, t: number): number {
 
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits }: Props) {
+  const pinRef = useRef({ pins, hits }); pinRef.current = { pins, hits };
+  useEffect(() => { kick.current(); }, [pins, hits]);
   const paint = useRef({ cur: painter, prev: painter, t0: 0 });
   const hoverCb = useRef(onHover); hoverCb.current = onHover;
   const kick = useRef<() => void>(() => {});
@@ -80,6 +85,19 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         .paddingInner((d) => Math.max(0.3, 2 * Math.pow(0.62, d.depth)))(root);
       const byId = new Map<string, RNode>();
       laid.each((n) => byId.set(n.data.id, n));
+      // subtree hit totals for pin aggregation
+      const subHits = new Map<RNode, HitCounts>();
+      const sumHits = () => {
+        const h = pinRef.current.hits;
+        laid.eachAfter((n) => {
+          const own = h.get(n.data.id);
+          const t = { llm: own?.llm ?? 0, sql: own?.sql ?? 0 };
+          for (const c of n.children ?? []) { const ct = subHits.get(c)!; t.llm += ct.llm; t.sql += ct.sql; }
+          subHits.set(n, t);
+        });
+      };
+      sumHits();
+      let hitsSeen = pinRef.current.hits;
       const maxDepth = laid.height;
 
       // ---- camera ----
@@ -106,6 +124,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       const g = new Graphics();
       app.stage.addChild(g);
       const labelPool: HTMLDivElement[] = [];
+      const pinPool: HTMLDivElement[] = [];
 
       const draw = (now: number) => {
         if (anim) {
@@ -127,17 +146,30 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
         g.clear();
         const W = app.screen.width, H = app.screen.height;
-        let li = 0;
-        const visit = (n: RNode) => {
+        let li = 0, pi = 0;
+        if (hitsSeen !== pinRef.current.hits) { hitsSeen = pinRef.current.hits; sumHits(); }
+        const { pins } = pinRef.current;
+        const ZERO: HitCounts = { llm: 0, sql: 0 };
+        const placePin = (kind: 'llm' | 'sql', count: number, x: number, y: number) => {
+          let el = pinPool[pi];
+          if (!el) { el = document.createElement('div'); pinPool.push(el); labelsEl.appendChild(el); }
+          pi++;
+          el.className = `pin ${kind}`;
+          el.textContent = String(count);
+          el.style.display = 'block';
+          el.style.transform = `translate(${x}px, ${y}px)`;
+        };
+        /** Returns hits accounted for (pinned here/below, or off-screen); unaccounted hits bubble up to the parent's pin. */
+        const visit = (n: RNode): HitCounts => {
           let x0 = (n.x0 - cam.x) * cam.k, y0 = (n.y0 - cam.y) * cam.k;
           let w = (n.x1 - n.x0) * cam.k, h = (n.y1 - n.y0) * cam.k;
-          if (x0 > W || y0 > H || x0 + w < 0 || y0 + h < 0) return;
-          if (w < MIN_PX || h < MIN_PX) return;
+          if (x0 > W || y0 > H || x0 + w < 0 || y0 + h < 0) return subHits.get(n)!;
+          if (w < MIN_PX || h < MIN_PX) return ZERO;
           // grow-in: each depth starts later and scales up from its centre
           let alpha = 1;
           if (intro) {
             const p = Math.max(0, Math.min(1, (now - t0 - n.depth * DEPTH_STAGGER) / (INTRO_MS * 0.6)));
-            if (p <= 0) return;
+            if (p <= 0) return ZERO;
             const s = ease(p);
             x0 += (w * (1 - s)) / 2; y0 += (h * (1 - s)) / 2; w *= s; h *= s; alpha = s;
           }
@@ -153,6 +185,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           const layered = cur.colour(d) != null;
           const fillA = d.kind === 'folder' ? 0.55 : layered ? (dim ? 0.6 : 0.78) : dim ? 0.35 : 0.42;
           g.rect(x0, y0, w, h).fill({ color: mix(base, 0x0a0e17, Math.min(0.6, n.depth * 0.06)), alpha: fillA * alpha });
+          if (cur.hatch?.(d) && w > 4 && h > 4 && (!n.children || d.kind === 'file')) {
+            // diagonal hatch = no data: lines x + y = const clipped to the rect
+            for (let s2 = 6; s2 < w + h; s2 += 6) {
+              g.moveTo(x0 + Math.min(s2, w), y0 + Math.max(0, s2 - w)).lineTo(x0 + Math.max(0, s2 - h), y0 + Math.min(s2, h));
+            }
+            g.stroke({ width: 1, color: 0x64748b, alpha: 0.45 * alpha });
+          }
           if (h > 6) g.rect(x0, y0, w, Math.min(h * 0.35, 18)).fill({ color: 0xffffff, alpha: 0.035 * alpha }); // top sheen
           if (w > 8 && h > 8) g.rect(x0 + 1, y0 + h - Math.min(h * 0.25, 10), w - 2, Math.min(h * 0.25, 10) - 1).fill({ color: 0x000000, alpha: 0.12 * alpha }); // inset shadow
           // luminous 1px border
@@ -176,13 +215,23 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             lab.style.opacity = dim ? '0.55' : '1';
           }
 
-          if (!n.children) return;
+          const covered = { llm: 0, sql: 0 };
           // semantic zoom: hide inner-file structure until the file is big on screen
-          if (d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PX * 0.6)) return;
-          for (const c of n.children) visit(c);
+          if (n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PX * 0.6))) {
+            for (const c of n.children) { const r = visit(c); covered.llm += r.llm; covered.sql += r.sql; }
+          }
+          const tot = subHits.get(n)!;
+          if (!intro && w >= 8 && h >= 8) {
+            let px = Math.min(W - 16, x0 + w - 16);
+            const py = Math.max(0, y0 + 2);
+            if (pins.llm && tot.llm > covered.llm) { placePin('llm', tot.llm - covered.llm, px, py); px -= 20; covered.llm = tot.llm; }
+            if (pins.sql && tot.sql > covered.sql) { placePin('sql', tot.sql - covered.sql, px, py); covered.sql = tot.sql; }
+          }
+          return covered;
         };
         visit(laid);
         for (let i = li; i < labelPool.length; i++) labelPool[i]!.style.display = 'none';
+        for (let i = pi; i < pinPool.length; i++) pinPool[i]!.style.display = 'none';
       };
       app.ticker.add(() => draw(performance.now()));
       kick.current = () => { dirty = true; };

@@ -8,3 +8,8 @@ html, body, #root { height: 100%; margin: 0; background: #0a0e17; color: #cbd5e1
 .tile-label.folder { color: rgba(125, 211, 252, 0.9); font-family: Inter, system-ui, sans-serif; font-weight: 600; letter-spacing: 0.02em; }
 .legend-in { animation: legend-in 400ms cubic-bezier(.2,.8,.2,1); }
 @keyframes legend-in { from { opacity: 0; transform: translateY(6px) scaleX(0.92); } to { opacity: 1; transform: none; } }
+.hatch { background: repeating-linear-gradient(45deg, #475569 0 2px, #1e293b 2px 5px); }
+@keyframes pinpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.7); } 50% { box-shadow: 0 0 0 5px rgba(34, 211, 238, 0); } }
+.pin { position: absolute; left: 0; top: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font: 600 9px/14px ui-monospace, monospace; text-align: center; color: #0a0e17; pointer-events: none; }
+.pin.llm { background: #22d3ee; animation: pinpulse 1.6s ease-in-out infinite; }
+.pin.sql { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }

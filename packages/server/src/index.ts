@@ -25,10 +25,10 @@ export async function startServer(opts: ServerOptions = {}) {
   const blaming = new Map<string, Record<string, number>>(); // root -> ages delivered so far
   const cache = new Map<string, Snapshot>();
 
-  const doScan = async (p: string, showDocs = false) => {
+  const doScan = async (p: string, showDocs = false, coverageReport?: string) => {
     const abs = path.resolve(p);
-    const key = `${abs}|${showDocs}`;
-    const snap = await scan(abs, { showDocs, onProgress: (pr) => send({ ...pr, root: abs }) });
+    const key = `${abs}|${showDocs}|${coverageReport ?? ''}`;
+    const snap = await scan(abs, { showDocs, coverageReport, onProgress: (pr) => send({ ...pr, root: abs }) });
     cache.set(key, snap);
     // Background per-function age via git blame, streamed as layer updates after the scan returns.
     if (snap.git?.available) {
@@ -49,13 +49,13 @@ export async function startServer(opts: ServerOptions = {}) {
     const parsed = ScanRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.message });
     if (!existsSync(parsed.data.path)) return reply.code(404).send({ error: `Path not found: ${parsed.data.path}` });
-    return doScan(parsed.data.path, parsed.data.showDocs);
+    return doScan(parsed.data.path, parsed.data.showDocs, parsed.data.coverageReport);
   });
-  app.get<{ Querystring: { path?: string; showDocs?: string } }>('/api/scan', async (req, reply) => {
+  app.get<{ Querystring: { path?: string; showDocs?: string; coverageReport?: string } }>('/api/scan', async (req, reply) => {
     const p = req.query.path ?? opts.defaultPath;
     if (!p) return reply.code(400).send({ error: 'path required' });
     if (!existsSync(p)) return reply.code(404).send({ error: `Path not found: ${p}` });
-    return doScan(p, req.query.showDocs === 'true');
+    return doScan(p, req.query.showDocs === 'true', req.query.coverageReport);
   });
   app.get<{ Querystring: { path?: string } }>('/api/layers/age', async (req) => blaming.get(path.resolve(req.query.path ?? '')) ?? {});
   // Progress stream (M1 stub: broadcasts stage events of any running scan).
