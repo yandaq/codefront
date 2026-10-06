@@ -17,8 +17,8 @@ interface Props {
   pins: PinState;
   hits: Map<string, HitCounts>;
   edges: Edge[];
-  /** Tab-toggled exploded view: much wider gaps between tiles (folders more than files). */
-  exploded?: boolean;
+  /** Exploded-view level (0 off, 1 medium, 2 large): tiles keep their size and drift apart (folders far more than files). */
+  exploded?: number;
   edgeMode: 'imports' | 'cochange';
   selectedId: string | null;
   onSelect: (n: TreeNode | null) => void;
@@ -78,7 +78,64 @@ function bundle(pts: [number, number][], beta: number, steps = 6): [number, numb
   return out;
 }
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = false }: Props) {
+/** Exploded-view strength per level (index = level). */
+const EXPLODE = [0, 0.9, 2];
+/** How strongly a parent's children drift apart: folders a lot (decaying with depth), function tiles inside files not at all. */
+const spread = (n: RNode) => (n.data.kind === 'folder' ? Math.pow(0.4, n.depth) : 0); // files (and their function tiles) keep their exact geometry
+/**
+ * Exploded-view transform on a finished layout: every tile keeps its size; each child's centre offset from its
+ * parent's centre is scaled by f >= 1 + k*spread (raised further if needed so grown sibling subtrees never overlap),
+ * and the parent grows to enclose its exploded children plus its original padding. Arrangement is unchanged.
+ */
+function explode(root: RNode, k: number) {
+  // bottom-up: per node, the exploded extent and its children's offsets (relative to the node's original centre)
+  const ext = new Map<RNode, { w: number; h: number; cx: number; cy: number }>(); // cx/cy: exploded-box centre offset from original centre
+  const off = new Map<RNode, [number, number]>(); // child's exploded-box centre relative to parent's original centre
+  root.eachAfter((n) => {
+    const w = n.x1 - n.x0, h = n.y1 - n.y0;
+    const kids = n.children;
+    if (!kids?.length) { ext.set(n, { w, h, cx: 0, cy: 0 }); return; }
+    const pcx = (n.x0 + n.x1) / 2, pcy = (n.y0 + n.y1) / 2;
+    const c = kids.map((ch) => { const e = ext.get(ch)!; return { ch, e, x: (ch.x0 + ch.x1) / 2 - pcx, y: (ch.y0 + ch.y1) / 2 - pcy }; });
+    let f = 1 + k * spread(n);
+    const inner = Math.max(0.3, 2 * Math.pow(0.62, n.depth)); // original sibling gap
+    for (let i = 0; i < c.length; i++) for (let j = i + 1; j < c.length; j++) {
+      const a = c[i]!, b = c[j]!;
+      const dx = Math.abs(b.x + b.e.cx - a.x - a.e.cx), dy = Math.abs(b.y + b.e.cy - a.y - a.e.cy);
+      // separated along whichever axis they were originally apart on
+      const sepX = Math.max(a.ch.x0, b.ch.x0) - Math.min(a.ch.x1, b.ch.x1), sepY = Math.max(a.ch.y0, b.ch.y0) - Math.min(a.ch.y1, b.ch.y1);
+      if (sepX >= sepY && dx > 0) f = Math.max(f, ((a.e.w + b.e.w) / 2 + inner) / dx);
+      else if (dy > 0) f = Math.max(f, ((a.e.h + b.e.h) / 2 + inner) / dy);
+    }
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const { ch, e, x, y } of c) {
+      const ox = x * f + e.cx, oy = y * f + e.cy;
+      off.set(ch, [ox, oy]);
+      bx0 = Math.min(bx0, ox - e.w / 2); bx1 = Math.max(bx1, ox + e.w / 2);
+      by0 = Math.min(by0, oy - e.h / 2); by1 = Math.max(by1, oy + e.h / 2);
+    }
+    // original padding between this node's edge and its children's bbox, kept (sides grow with the spread)
+    const m = 1 + k * spread(n);
+    const pl0 = Math.min(...kids.map((ch) => ch.x0)) - n.x0;
+    const pl = pl0 * m, pr = (n.x1 - Math.max(...kids.map((ch) => ch.x1))) * m;
+    const pt = Math.min(...kids.map((ch) => ch.y0)) - n.y0 + (pl - pl0), pb = (n.y1 - Math.max(...kids.map((ch) => ch.y1))) * m; // header kept
+    const x0 = bx0 - pl, x1 = bx1 + pr, y0 = by0 - pt, y1 = by1 + pb;
+    ext.set(n, { w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 });
+  });
+  // top-down: place each exploded box; offsets are relative to the parent's original centre, whose exploded box
+  // centre sits at (cx, cy) from it
+  const place = (n: RNode, ox: number, oy: number) => {
+    const e = ext.get(n)!;
+    const ncx = ox, ncy = oy; // new exploded-box centre
+    const origCx = ncx - e.cx, origCy = ncy - e.cy; // where the original centre maps
+    for (const ch of n.children ?? []) { const [cx, cy] = off.get(ch)!; place(ch, origCx + cx, origCy + cy); }
+    n.x0 = ncx - e.w / 2; n.x1 = ncx + e.w / 2; n.y0 = ncy - e.h / 2; n.y1 = ncy + e.h / 2;
+  };
+  const r = ext.get(root)!;
+  place(root, (root.x0 + root.x1) / 2 + r.cx, (root.y0 + root.y1) / 2 + r.cy);
+}
+
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = 0 }: Props) {
   const explodeRef = useRef(exploded); explodeRef.current = exploded;
   const selRef = useRef(selectedId); selRef.current = selectedId;
   const selectCb = useRef(onSelect); selectCb.current = onSelect;
@@ -119,22 +176,16 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
       // ---- layout (world space) ----
       const worldH = WORLD_W * (el.clientHeight / Math.max(1, el.clientWidth));
-      // exploded view: folder gaps x6 (outer x5), file-internal gaps x1.5; capped to a fraction of the parent so small tiles survive
-      const cap = (d: RNode, p: number, f: number) => Math.min(p, Math.max(0.3, Math.min(d.x1 - d.x0, d.y1 - d.y0) * f));
-      const ex = (d: RNode, base: number, folderK: number, fileK: number) => {
-        if (!explodeRef.current) return base;
-        return d.data.kind === 'folder' ? cap(d, base * folderK, 0.1) : cap(d, base * fileK, 0.04);
-      };
-      const side = (d: RNode) => ex(d, Math.max(0.3, 3 * Math.pow(0.62, d.depth)), 5, 1);
-      const layout = (s: Snapshot): RNode => treemap<TreeNode>()
+      const base = (s: Snapshot): RNode => treemap<TreeNode>()
         .tile(treemapSquarify.ratio(1.2))
         .size([WORLD_W, worldH])
-        .paddingTop((d) => (d.data.kind === 'folder' ? Math.max(Math.max(1.5, 18 * Math.pow(0.62, d.depth)), side(d)) : Math.max(0.4, 6 * Math.pow(0.6, d.depth))))
-        .paddingRight(side)
-        .paddingBottom(side)
-        .paddingLeft(side)
-        .paddingInner((d) => ex(d, Math.max(0.3, 2 * Math.pow(0.62, d.depth)), 6, 1.5))(
+        .paddingTop((d) => (d.data.kind === 'folder' ? Math.max(1.5, 18 * Math.pow(0.62, d.depth)) : Math.max(0.4, 6 * Math.pow(0.6, d.depth))))
+        .paddingRight((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
+        .paddingBottom((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
+        .paddingLeft((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
+        .paddingInner((d) => Math.max(0.3, 2 * Math.pow(0.62, d.depth)))(
           hierarchy(s.root, (d) => d.children).sum((d) => (d.children?.length ? 0 : d.sloc)).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)));
+      const layout = (s: Snapshot): RNode => { const r = base(s); const k = EXPLODE[explodeRef.current] ?? 0; if (k > 0) explode(r, k); return r; };
       let laid = layout(snapRef.current);
       let byId = new Map<string, RNode>();
       const index = () => { byId = new Map(); laid.each((n) => byId.set(n.data.id, n)); };
@@ -206,9 +257,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         diff = { t0: performance.now(), prev, removed: [] };
         focus = byId.get(focus.data.id) ?? laid;
         anim = { from: { ...cam }, to: fit(focus), t0: performance.now(), dur: DIFF_MS };
-        el.dataset.exploded = explodeRef.current ? '1' : '0';
+        el.dataset.exploded = String(explodeRef.current);
       };
-      el.dataset.exploded = explodeRef.current ? '1' : '0';
+      el.dataset.exploded = String(explodeRef.current);
       (el as HTMLElement & { __rect?: (id: string) => Rect | null }).__rect = (id) => { const n = byId.get(id); return n ? [n.x0, n.y0, n.x1, n.y1] : null; }; // test hook
       api.current = { focusId: (id) => { const n = byId.get(id); if (n) flyTo(n); }, load, relayout };
 
@@ -594,7 +645,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
     };
   }, []);
 
-  useEffect(() => { if (host.current && host.current.dataset.exploded !== (exploded ? '1' : '0')) api.current?.relayout(); }, [exploded]);
+  useEffect(() => { if (host.current && host.current.dataset.exploded !== String(exploded)) api.current?.relayout(); }, [exploded]);
   useEffect(() => { if (focusRequest) api.current?.focusId(focusRequest.id); }, [focusRequest]);
 
   return <div ref={host} data-treemap className="absolute inset-0" />;

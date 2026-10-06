@@ -49,22 +49,33 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       await expect.poll(() => p2.evaluate(() => document.querySelector<HTMLElement>('[data-focus]')?.dataset.focus)).toBe('deep/a/b/c/deep.ts');
       await p2.waitForTimeout(1000);
       expect(await p2.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0))).toBeGreaterThan(0);
-      // Tab toggles the exploded view: data-exploded flips and the gap between sibling folders grows
+      // Tab cycles the exploded view (off -> medium -> large -> off): tiles keep their size and order, folders drift apart
       const p3 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
       await p3.goto(url);
       await p3.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
-      const gap = () => p3.evaluate(() => {
+      const rects = () => p3.evaluate(() => {
         const r = (document.querySelector('[data-treemap]') as HTMLElement & { __rect: (id: string) => number[] }).__rect;
-        const a = r('src'), b = r('deep');
-        return Math.max(a[0]! - b[2]!, b[0]! - a[2]!, a[1]! - b[3]!, b[1]! - a[3]!);
+        return { a: r('src'), b: r('deep'), f: r('src/big.ts') };
       });
+      const gapOf = ({ a, b }: { a: number[]; b: number[] }) => Math.max(a[0]! - b[2]!, b[0]! - a[2]!, a[1]! - b[3]!, b[1]! - a[3]!);
       const exploded = () => p3.evaluate(() => document.querySelector<HTMLElement>('[data-treemap]')?.dataset.exploded);
       expect(await exploded()).toBe('0');
-      const g0 = await gap();
+      const r0 = await rects();
       await p3.locator('body').click({ position: { x: 5, y: 790 } }).catch(() => {});
       await p3.keyboard.press('Tab');
       await expect.poll(exploded).toBe('1');
-      expect(await gap()).toBeGreaterThan(g0 * 2);
+      const r1 = await rects();
+      expect(gapOf(r1)).toBeGreaterThan(gapOf(r0) * 3);
+      // sibling order unchanged: same sign of centre ordering on each axis where they differed meaningfully
+      const ord = (r: { a: number[]; b: number[] }, i: number) => { const d = (r.a[i]! + r.a[i + 2]! - r.b[i]! - r.b[i + 2]!) / 2; return Math.abs(d) < 5 ? 0 : Math.sign(d); };
+      for (const i of [0, 1]) if (ord(r0, i) !== 0) expect(ord(r1, i)).toBe(ord(r0, i));
+      expect(ord(r0, 0) !== 0 || ord(r0, 1) !== 0).toBe(true);
+      // leaf file tile size unchanged
+      expect(r1.f[2]! - r1.f[0]!).toBeCloseTo(r0.f[2]! - r0.f[0]!, 3);
+      expect(r1.f[3]! - r1.f[1]!).toBeCloseTo(r0.f[3]! - r0.f[1]!, 3);
+      await p3.keyboard.press('Tab');
+      await expect.poll(exploded).toBe('2');
+      expect(gapOf(await rects())).toBeGreaterThan(gapOf(r1));
       await p3.keyboard.press('Tab');
       await expect.poll(exploded).toBe('0');
     } finally {

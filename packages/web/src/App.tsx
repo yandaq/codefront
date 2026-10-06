@@ -51,8 +51,9 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [peek, setPeek] = useState<PeekReq | null>(null);
   const [palette, setPalette] = useState(false);
-  const [exploded, setExploded] = useState(() => { try { return localStorage.getItem('grim.exploded') === '1'; } catch { return false; } });
-  useEffect(() => { try { localStorage.setItem('grim.exploded', exploded ? '1' : '0'); } catch { /* storage blocked */ } }, [exploded]);
+  // exploded view level: 0 off, 1 medium, 2 large (Tab cycles forward, Shift+Tab back)
+  const [exploded, setExploded] = useState(() => { try { const v = Number(localStorage.getItem('grim.exploded')); return v === 1 || v === 2 ? v : 0; } catch { return 0; } });
+  useEffect(() => { try { localStorage.setItem('grim.exploded', String(exploded)); } catch { /* storage blocked */ } }, [exploded]);
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
   const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
@@ -66,7 +67,7 @@ export function App() {
       else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && !palette) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-        e.preventDefault(); setExploded((x) => !x);
+        e.preventDefault(); setExploded((x) => (x + (e.shiftKey ? 2 : 1)) % 3);
       }
       else if (e.key === 'Escape' && peek) { e.preventDefault(); setPeek(null); }
     };
@@ -239,9 +240,9 @@ export function App() {
               </span>
             ))}
           </nav>
-          <button type="button" data-explode-toggle title="Exploded view: wider gaps between folders and files (Tab)" onClick={() => setExploded((x) => !x)}
+          <button type="button" data-explode-toggle title="Exploded view: off / medium / large (Tab cycles, Shift+Tab back)" onClick={() => setExploded((x) => (x + 1) % 3)}
             className={`glass pointer-events-auto rounded-lg px-2.5 py-1.5 font-mono text-xs ${exploded ? 'text-cyan-200 ring-1 ring-cyan-400/40' : 'text-slate-400 hover:text-cyan-300'}`}>
-            {exploded ? 'Exploded · Tab' : '⊞ Explode · Tab'}
+            {exploded ? `Exploded ${exploded === 1 ? 'medium' : 'large'} · Tab` : '⊞ Explode · Tab'}
           </button>
           </div>
         )}

@@ -77,7 +77,7 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Code peek: Shiki-highlighted source (theme matching UI), scrolled to function, coverage gutters when available.
 - Open in editor: `vscode://file/...` (configurable: Cursor, JetBrains, …); remote repos link to host line URL.
 - `⌘K` fuzzy search over files/functions; camera flies to result.
-- `Tab` toggles an exploded view (much wider gaps; folders separate more than files), animated in place and remembered per browser.
+- `Tab` cycles an exploded view off → medium → large (`Shift+Tab` steps back; level shown on the toolbar chip, remembered per browser). It is a post-layout transform of the normal treemap: every tile keeps its size and relative position, and each child's offset from its parent's centre is scaled outward (top-level folders most, nested folders less, functions inside files not at all), parents growing to enclose them. Tiles glide straight outward via the diff tween and the camera re-fits the focus.
 
 ## 8. Visual design — "Mission Control"
 - Dark hero theme (light toggle available). Background `#0a0e17`.

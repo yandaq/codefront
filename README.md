@@ -51,4 +51,4 @@ pnpm test                          # Vitest (packages/core)
 - `cli` – `grim-repo [path|url]`, `grim-repo scan`; publishable bundle
 
 ## Controls
-Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump, Tab to toggle the exploded view (wider gaps between folders and files).
+Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump, Tab to cycle the exploded view off → medium → large (Shift+Tab steps back): tiles keep their size and arrangement and drift apart like an exploded-view diagram, folders far more than files.
