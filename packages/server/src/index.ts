@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWs from '@fastify/websocket';
-import { scan } from '@grim-repo/core';
-import { ScanRequestSchema, type ScanProgress, type Snapshot } from '@grim-repo/schema';
+import { scan, blameTree } from '@grim-repo/core';
+import { ScanRequestSchema, type ProgressMessage, type Snapshot } from '@grim-repo/schema';
 
 export interface ServerOptions { port?: number; host?: string; defaultPath?: string; webRoot?: string }
 
@@ -20,14 +20,27 @@ function resolveWebRoot(): string | null {
 export async function startServer(opts: ServerOptions = {}) {
   const app = Fastify({ logger: false });
   await app.register(fastifyWs);
-  const listeners = new Set<(p: ScanProgress) => void>();
+  const listeners = new Set<(p: ProgressMessage) => void>();
+  const send = (m: ProgressMessage) => listeners.forEach((l) => l(m));
+  const blaming = new Map<string, Record<string, number>>(); // root -> ages delivered so far
   const cache = new Map<string, Snapshot>();
 
   const doScan = async (p: string, showDocs = false) => {
     const abs = path.resolve(p);
     const key = `${abs}|${showDocs}`;
-    const snap = await scan(abs, { showDocs, onProgress: (pr) => listeners.forEach((l) => l(pr)) });
+    const snap = await scan(abs, { showDocs, onProgress: (pr) => send({ ...pr, root: abs }) });
     cache.set(key, snap);
+    // Background per-function age via git blame, streamed as layer updates after the scan returns.
+    if (snap.git?.available) {
+      const acc: Record<string, number> = {};
+      blaming.set(abs, acc);
+      setImmediate(() => {
+        blameTree(abs, snap.root, (values, done, total) => {
+          Object.assign(acc, values);
+          send({ type: 'layer', layer: 'age', root: abs, values, done, total });
+        }).catch(() => {});
+      });
+    }
     return snap;
   };
 
@@ -44,9 +57,10 @@ export async function startServer(opts: ServerOptions = {}) {
     if (!existsSync(p)) return reply.code(404).send({ error: `Path not found: ${p}` });
     return doScan(p, req.query.showDocs === 'true');
   });
+  app.get<{ Querystring: { path?: string } }>('/api/layers/age', async (req) => blaming.get(path.resolve(req.query.path ?? '')) ?? {});
   // Progress stream (M1 stub: broadcasts stage events of any running scan).
   app.get('/api/progress', { websocket: true }, (socket) => {
-    const l = (p: ScanProgress) => socket.send(JSON.stringify(p));
+    const l = (p: ProgressMessage) => socket.send(JSON.stringify(p));
     listeners.add(l);
     socket.on('close', () => listeners.delete(l));
   });

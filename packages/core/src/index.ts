@@ -4,6 +4,9 @@ import { walk, readTextFile } from './walk.js';
 import { codeLines, fallbackComments } from './sloc.js';
 import { languageFor, parseSource } from './parse.js';
 import { buildFileChildren } from './build.js';
+import { readHistory, applyHistory } from './git.js';
+
+export { readHistory, applyHistory, blameTree, blameLines, functionAges, renameTarget, isGitRepo } from './git.js';
 
 export { walk } from './walk.js';
 export { codeLines, countSloc, fallbackComments } from './sloc.js';
@@ -58,6 +61,9 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
   sum(rootNode);
   const prune = (n: TreeNode) => { if (n.children) { n.children = n.children.filter((c) => c.sloc > 0); n.children.forEach(prune); } };
   prune(rootNode);
+  const hist = await readHistory(root);
+  applyHistory(rootNode, hist);
+  opts.onProgress?.({ stage: 'git', done: hist.commits.length, total: hist.commits.length });
   let fileCount = 0;
   const count = (n: TreeNode) => { if (n.kind === 'file') fileCount++; else n.children?.forEach(count); };
   count(rootNode);
@@ -66,6 +72,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
     version: 1, createdAt: new Date().toISOString(), source: { type: 'local', path: root },
     stats: { files: fileCount, sloc: rootNode.sloc, parsedFiles: parsed, durationMs: Date.now() - t0 },
     root: rootNode,
+    git: { available: hist.available, commits: hist.commits, head: hist.head },
   };
 }
 

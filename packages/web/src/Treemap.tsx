@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Application, Graphics } from 'pixi.js';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
 import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Painter } from './layers';
 
 type RNode = HierarchyRectangularNode<TreeNode>;
 interface Cam { x: number; y: number; k: number }
@@ -9,7 +10,10 @@ interface Props {
   snapshot: Snapshot;
   onFocusChange: (crumbs: { id: string; name: string }[]) => void;
   focusRequest: { id: string; n: number } | null;
+  painter: Painter;
+  onHover: (h: { node: TreeNode; x: number; y: number } | null) => void;
 }
+const FADE_MS = 400;
 
 const WORLD_W = 1600;
 const INTRO_MS = 1400;
@@ -35,7 +39,17 @@ function mix(a: number, b: number, t: number): number {
 
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 
-export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover }: Props) {
+  const paint = useRef({ cur: painter, prev: painter, t0: 0 });
+  const hoverCb = useRef(onHover); hoverCb.current = onHover;
+  const kick = useRef<() => void>(() => {});
+  useEffect(() => {
+    const p = paint.current;
+    if (p.cur === painter) return;
+    // a painter replaced within the same layer (e.g. blame batch) shouldn't restart the fade from scratch
+    p.prev = p.cur; p.cur = painter; p.t0 = performance.now();
+    kick.current();
+  }, [painter]);
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<{ focusId: (id: string) => void } | null>(null);
 
@@ -104,9 +118,11 @@ export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
           if (t >= 1) anim = null;
           dirty = true;
         }
+        const fadeT = Math.min(1, (now - paint.current.t0) / FADE_MS);
+        const fading = fadeT < 1;
         const introT = (now - t0) / (INTRO_MS + maxDepth * DEPTH_STAGGER);
         const intro = introT < 1;
-        if (!dirty && !intro) return;
+        if (!dirty && !intro && !fading) return;
         dirty = false;
 
         g.clear();
@@ -126,11 +142,16 @@ export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
             x0 += (w * (1 - s)) / 2; y0 += (h * (1 - s)) / 2; w *= s; h *= s; alpha = s;
           }
           const d = n.data;
-          const base = colourFor(n);
+          const def = colourFor(n);
+          const { cur, prev } = paint.current;
+          const cc = cur.colour(d) ?? def;
+          const base = fading ? mix(prev.colour(d) ?? def, cc, ease(fadeT)) : cc;
+          const glow = cur.glow(d);
           const isCode = d.kind !== 'folder';
           const dim = d.kind === 'module-scope' || d.kind === 'small-group';
           // glass body + depth "terrain" shading
-          const fillA = d.kind === 'folder' ? 0.55 : dim ? 0.35 : 0.42;
+          const layered = cur.colour(d) != null;
+          const fillA = d.kind === 'folder' ? 0.55 : layered ? (dim ? 0.6 : 0.78) : dim ? 0.35 : 0.42;
           g.rect(x0, y0, w, h).fill({ color: mix(base, 0x0a0e17, Math.min(0.6, n.depth * 0.06)), alpha: fillA * alpha });
           if (h > 6) g.rect(x0, y0, w, Math.min(h * 0.35, 18)).fill({ color: 0xffffff, alpha: 0.035 * alpha }); // top sheen
           if (w > 8 && h > 8) g.rect(x0 + 1, y0 + h - Math.min(h * 0.25, 10), w - 2, Math.min(h * 0.25, 10) - 1).fill({ color: 0x000000, alpha: 0.12 * alpha }); // inset shadow
@@ -138,6 +159,10 @@ export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
           const borderCol = isCode ? mix(base, 0xffffff, 0.35) : 0x38bdf8;
           g.rect(x0 + 0.5, y0 + 0.5, Math.max(0, w - 1), Math.max(0, h - 1)).stroke({ width: 1, color: borderCol, alpha: (dim ? 0.18 : isCode ? 0.55 : 0.22 + 0.25 / (1 + n.depth)) * alpha });
 
+          if (glow && w > 3 && h > 3) {
+            g.rect(x0 - 1.5, y0 - 1.5, w + 3, h + 3).stroke({ width: 3, color: 0xfde68a, alpha: 0.35 * alpha * (fading ? fadeT : 1) });
+            g.rect(x0 + 0.5, y0 + 0.5, w - 1, h - 1).stroke({ width: 1.5, color: 0xfffbeb, alpha: 0.8 * alpha * (fading ? fadeT : 1) });
+          }
           // labels
           if (!intro && w > 44 && h > 16 && li < 400) {
             let lab = labelPool[li];
@@ -160,6 +185,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
         for (let i = li; i < labelPool.length; i++) labelPool[i]!.style.display = 'none';
       };
       app.ticker.add(() => draw(performance.now()));
+      kick.current = () => { dirty = true; };
 
       // ---- interaction ----
       const toWorld = (sx: number, sy: number) => ({ x: sx / cam.k + cam.x, y: sy / cam.k + cam.y });
@@ -190,7 +216,24 @@ export function Treemap({ snapshot, onFocusChange, focusRequest }: Props) {
       let drag: { x: number; y: number; moved: boolean } | null = null;
       const onDown = (e: PointerEvent) => { if (e.button === 0) drag = { x: e.clientX, y: e.clientY, moved: false }; };
       const onMove = (e: PointerEvent) => {
-        if (!drag) return;
+        if (!drag) {
+          const r = canvas.getBoundingClientRect();
+          const sx = e.clientX - r.left, sy = e.clientY - r.top;
+          if (sx < 0 || sy < 0 || sx > r.width || sy > r.height || e.target !== canvas) { hoverCb.current(null); return; }
+          const w = toWorld(sx, sy);
+          // deepest node that is actually drawn (respect semantic zoom)
+          const path = hit(w.x, w.y);
+          let pick = path[0]!;
+          for (const n of path) {
+            const pw = (n.x1 - n.x0) * cam.k, ph = (n.y1 - n.y0) * cam.k;
+            if (pw < MIN_PX || ph < MIN_PX) break;
+            pick = n;
+            if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PX * 0.6)) break;
+          }
+          hoverCb.current({ node: pick.data, x: e.clientX, y: e.clientY });
+          return;
+        }
+        hoverCb.current(null);
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (!drag.moved && Math.hypot(dx, dy) < 4) return;
         drag.moved = true; anim = null;
