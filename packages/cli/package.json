@@ -1,0 +1,4 @@
+{ "name": "grim-repo", "version": "0.1.0", "type": "module",
+  "bin": { "grim-repo": "dist/index.js" },
+  "scripts": { "build": "tsc -p ." },
+  "dependencies": { "@grim-repo/server": "workspace:*", "open": "^10.1.0" } }

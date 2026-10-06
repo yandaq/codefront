@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; margin: 0; background: #0a0e17; color: #cbd5e1; overflow: hidden; }
+.glass { background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(14px); border: 1px solid rgba(94, 234, 212, 0.18); box-shadow: 0 0 24px rgba(34, 211, 238, 0.06), inset 0 1px 0 rgba(255,255,255,0.05); }
+.tile-label { position: absolute; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; line-height: 14px; color: rgba(226, 232, 240, 0.85); text-shadow: 0 1px 2px rgba(0,0,0,0.8); padding: 1px 4px; }
+.tile-label.folder { color: rgba(125, 211, 252, 0.9); font-family: Inter, system-ui, sans-serif; font-weight: 600; letter-spacing: 0.02em; }

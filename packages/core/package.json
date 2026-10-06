@@ -1,0 +1,6 @@
+{ "name": "@grim-repo/core", "version": "0.1.0", "type": "module",
+  "main": "dist/index.js", "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -p .", "test": "vitest run" },
+  "dependencies": { "@grim-repo/schema": "workspace:*", "ignore": "^6.0.2", "web-tree-sitter": "0.22.6", "tree-sitter-wasms": "^0.1.12" },
+  "devDependencies": { "vitest": "^2.1.0" } }
