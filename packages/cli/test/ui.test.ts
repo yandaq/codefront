@@ -53,6 +53,12 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       const p3 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
       await p3.goto(url);
       await p3.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
+      // layer dock help tooltip: hover a row, glass tooltip appears; Esc dismisses it
+      await p3.locator('[data-layer="hotspots"]').hover();
+      await expect.poll(() => p3.locator('[role="tooltip"]').textContent(), { timeout: 3000 }).toContain('Churn × complexity');
+      await p3.locator('[data-layer="hotspots"]').focus();
+      await p3.keyboard.press('Escape');
+      await expect.poll(() => p3.locator('[role="tooltip"]').count()).toBe(0);
       const rects = () => p3.evaluate(() => {
         const r = (document.querySelector('[data-treemap]') as HTMLElement & { __rect: (id: string) => number[] }).__rect;
         return { a: r('src'), b: r('deep'), f: r('src/big.ts') };

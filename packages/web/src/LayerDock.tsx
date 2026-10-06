@@ -1,5 +1,6 @@
 import { CHURN_WINDOWS, type ChurnWindow } from '@grim-repo/schema';
 import type { CouplingOptions } from './coupling';
+import { Tip, type TipId } from './Tip';
 import { LAYERS, legendGradient, type CxOptions, type LayerId } from './layers';
 
 export interface PinState { llm: boolean; sql: boolean }
@@ -17,13 +18,14 @@ interface Props {
   coupling: CouplingOptions; setCoupling: (c: CouplingOptions) => void; couplingAvailable: boolean;
 }
 
-function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+function Seg<T extends string>({ value, options, onChange, tips }: { value: T; options: [T, string][]; onChange: (v: T) => void; tips?: TipId[] }) {
   return (
     <div className="mt-2 flex gap-1">
-      {options.map(([v, label]) => (
-        <button key={v} onClick={() => onChange(v)}
-          className={`flex-1 rounded border px-1 py-0.5 ${v === value ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}>{label}</button>
-      ))}
+      {options.map(([v, label], i) => {
+        const b = <button key={v} onClick={() => onChange(v)}
+          className={`w-full rounded border px-1 py-0.5 ${v === value ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}>{label}</button>;
+        return tips?.[i] ? <Tip key={v} id={tips[i]!} className="flex-1">{b}</Tip> : <span key={v} className="flex-1">{b}</span>;
+      })}
     </div>
   );
 }
@@ -56,29 +58,29 @@ export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, lo
           const active = l.id === layer;
           const p = loading[l.id];
           return (
-            <button key={l.id} onClick={() => setLayer(l.id)}
-              className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-left transition-colors ${active ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.2)]' : 'border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}>
+            <Tip key={l.id} id={l.id} block><button data-layer={l.id} onClick={() => setLayer(l.id)}
+              className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left transition-colors ${active ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.2)]' : 'border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}>
               <span className="flex items-center gap-2">
                 <span className={`h-2.5 w-2.5 rounded-full border ${active ? 'border-cyan-300 bg-cyan-300' : 'border-slate-500'}`} />
                 {l.id === 'type' ? 'None / Type' : l.label}
               </span>
               {p != null && p < 1 ? <Ring p={p} /> : l.git && !gitAvailable ? <span className="text-[10px] text-slate-500">no git</span> : l.id === 'coverage' && !coverageAvailable ? <span className="text-[10px] text-slate-500">no data</span> : null}
-            </button>
+            </button></Tip>
           );
         })}
       </div>
       {(layer === 'churn' || layer === 'hotspots') && (
-        <div className="mt-2 flex gap-1">
+        <Tip id="window" block className="mt-2 flex gap-1">
           {(Object.keys(CHURN_WINDOWS) as ChurnWindow[]).map((w) => (
             <button key={w} onClick={() => setWindow(w)}
               className={`flex-1 rounded border px-1 py-0.5 ${w === window ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-100' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}>{w}</button>
           ))}
-        </div>
+        </Tip>
       )}
       {layer === 'complexity' && (
         <>
-          <Seg value={cx.mode} options={[['max', 'max'], ['mean', 'SLOC-wtd mean']]} onChange={(mode) => setCx({ ...cx, mode })} />
-          <Seg value={cx.absolute ? 'abs' : 'pct'} options={[['pct', 'percentile'], ['abs', 'absolute']]} onChange={(v) => setCx({ ...cx, absolute: v === 'abs' })} />
+          <Seg value={cx.mode} options={[['max', 'max'], ['mean', 'SLOC-wtd mean']]} onChange={(mode) => setCx({ ...cx, mode })} tips={['cxMax', 'cxMean']} />
+          <Seg value={cx.absolute ? 'abs' : 'pct'} options={[['pct', 'percentile'], ['abs', 'absolute']]} onChange={(v) => setCx({ ...cx, absolute: v === 'abs' })} tips={['cxPct', 'cxAbs']} />
         </>
       )}
       {layer !== 'type' && (
@@ -99,28 +101,28 @@ export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, lo
       <div className="mb-1 mt-3 text-[10px] uppercase tracking-[0.2em] text-cyan-300/80">Pins</div>
       <div className="flex flex-col gap-1">
         {([['llm', 'LLM Prompts', 'bg-cyan-300 shadow-[0_0_8px_#22d3ee]'], ['sql', 'SQL / Queries', 'bg-amber-400 shadow-[0_0_8px_#f59e0b]']] as const).map(([k, label, dot]) => (
-          <button key={k} onClick={() => setPins({ ...pins, [k]: !pins[k] })}
-            className={`flex items-center justify-between rounded-md border px-2 py-1.5 text-left ${pins[k] ? 'border-slate-500/50 bg-slate-700/30 text-slate-100' : 'border-transparent text-slate-400 hover:bg-slate-800/50'}`}>
+          <Tip key={k} id={k} block><button onClick={() => setPins({ ...pins, [k]: !pins[k] })}
+            className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left ${pins[k] ? 'border-slate-500/50 bg-slate-700/30 text-slate-100' : 'border-transparent text-slate-400 hover:bg-slate-800/50'}`}>
             <span className="flex items-center gap-2">
               <span className={`h-2.5 w-2.5 rounded-sm border border-slate-500 ${pins[k] ? dot : ''}`} />{label}
             </span>
             <span className="text-[10px] text-slate-500">{hitTotals[k]}</span>
-          </button>
+          </button></Tip>
         ))}
       </div>
       <div className="mb-1 mt-3 text-[10px] uppercase tracking-[0.2em] text-cyan-300/80">Edges</div>
-      <button onClick={() => setCoupling({ ...coupling, on: !coupling.on })} disabled={!couplingAvailable}
+      <Tip id="coupling" block><button onClick={() => setCoupling({ ...coupling, on: !coupling.on })} disabled={!couplingAvailable}
         className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left ${coupling.on ? 'border-slate-500/50 bg-slate-700/30 text-slate-100' : 'border-transparent text-slate-400 hover:bg-slate-800/50'}`}>
         <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-sm border border-slate-500 ${coupling.on ? 'bg-sky-300 shadow-[0_0_8px_#38bdf8]' : ''}`} />Coupling</span>
         {!couplingAvailable && <span className="text-[10px] text-slate-500">no data</span>}
-      </button>
+      </button></Tip>
       {coupling.on && (
         <>
-          <Seg value={coupling.mode} options={[['imports', 'Imports'], ['cochange', 'Co-change']]} onChange={(mode) => setCoupling({ ...coupling, mode })} />
+          <Seg value={coupling.mode} options={[['imports', 'Imports'], ['cochange', 'Co-change']]} onChange={(mode) => setCoupling({ ...coupling, mode })} tips={['imports', 'cochange']} />
           {coupling.mode === 'cochange' && (
             <div className="mt-2 flex flex-col gap-1 text-[11px] text-slate-400">
-              <label className="flex items-center gap-2">≥<input type="range" min={0} max={100} step={5} value={coupling.minConf} onChange={(e) => setCoupling({ ...coupling, minConf: Number(e.target.value) })} className="flex-1 accent-fuchsia-400" /><span className="w-9 text-right text-slate-200">{coupling.minConf}%</span></label>
-              <label className="flex items-center justify-between">min commits<input type="number" min={2} value={coupling.minCommits} onChange={(e) => setCoupling({ ...coupling, minCommits: Math.max(2, Number(e.target.value) || 2) })} className="w-14 rounded border border-slate-700 bg-slate-950/60 px-1 text-right text-slate-200" /></label>
+              <Tip id="minConf" block><label className="flex items-center gap-2">≥<input type="range" min={0} max={100} step={5} value={coupling.minConf} onChange={(e) => setCoupling({ ...coupling, minConf: Number(e.target.value) })} className="flex-1 accent-fuchsia-400" /><span className="w-9 text-right text-slate-200">{coupling.minConf}%</span></label></Tip>
+              <Tip id="minCommits" block><label className="flex items-center justify-between">min commits<input type="number" min={2} value={coupling.minCommits} onChange={(e) => setCoupling({ ...coupling, minCommits: Math.max(2, Number(e.target.value) || 2) })} className="w-14 rounded border border-slate-700 bg-slate-950/60 px-1 text-right text-slate-200" /></label></Tip>
             </div>
           )}
         </>
