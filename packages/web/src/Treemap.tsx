@@ -1,11 +1,31 @@
 import { useEffect, useRef } from 'react';
 import type { NodeChange } from './layers';
-import { Application, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, NineSliceSprite, Texture } from 'pixi.js';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
 import type { Snapshot, TreeNode } from '@grim-repo/schema';
 import type { HitCounts, Painter } from './layers';
 import type { PinState } from './LayerDock';
 import type { Edge } from './coupling';
+
+/** Nine-slice border of the halo texture (texture px). The innermost GLOW_PAD px of the border and the centre are
+ *  transparent so bilinear sampling never bleeds white into the stretched centre; the falloff spans GLOW_F px. */
+const GLOW_R = 48, GLOW_PAD = 2, GLOW_F = GLOW_R - GLOW_PAD, GLOW_C = 4;
+function makeGlowTexture(): Texture {
+  const n = 2 * GLOW_R + GLOW_C, lo = GLOW_F, hi = n - GLOW_F, c = document.createElement('canvas');
+  c.width = c.height = n;
+  const ctx = c.getContext('2d')!, img = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const px = x + 0.5, py = y + 0.5; // distance outside the tile rect [lo, hi]
+    const dx = Math.max(lo - px, px - hi, 0), dy = Math.max(lo - py, py - hi, 0);
+    const inside = px > lo && px < hi && py > lo && py < hi;
+    const t = Math.min(1, Math.hypot(dx, dy) / GLOW_F);
+    const a = inside ? 0 : Math.exp(-4.5 * t * t) * (1 - t * t * t); // Gaussian-like, forced to 0 at the rim
+    const i = (y * n + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; img.data[i + 3] = Math.round(255 * a);
+  }
+  ctx.putImageData(img, 0, 0);
+  return Texture.from(c);
+}
 
 type RNode = HierarchyRectangularNode<TreeNode>;
 interface Cam { x: number; y: number; k: number }
@@ -291,8 +311,21 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       // changes overlay: own layer so the breathing pulse is just an alpha tweak (no geometry rebuild)
       const cg = new Graphics();
       // uncommitted overlay: crisp layer + wide outer halo layer, both pulsed via alpha only
-      const ug = new Graphics(), uh = new Graphics();
-      app.stage.addChild(cg, uh, ug, eg, pg);
+      const ug = new Graphics();
+      // soft halos: pooled nine-slice sprites of one smooth falloff texture (no banding, size-independent corners)
+      const cgh = new Container(), uh = new Container();
+      const glowTex = makeGlowTexture();
+      const chPool: NineSliceSprite[] = [], uhPool: NineSliceSprite[] = [];
+      let chN = 0, uhN = 0;
+      const halo = (layer: Container, pool: NineSliceSprite[], i: number, x: number, y: number, w: number, h: number, r: number, a: number) => {
+        let sp = pool[i];
+        if (!sp) { sp = new NineSliceSprite({ texture: glowTex, leftWidth: GLOW_R, rightWidth: GLOW_R, topHeight: GLOW_R, bottomHeight: GLOW_R }); pool.push(sp); layer.addChild(sp); }
+        const k = r / GLOW_F; // corners/edges scale with halo width; centre stretches over the tile
+        sp.visible = true; sp.alpha = a; sp.scale.set(k);
+        sp.position.set(x - r, y - r);
+        sp.width = (w + 2 * r) / k; sp.height = (h + 2 * r) / k;
+      };
+      app.stage.addChild(cgh, cg, uh, ug, eg, pg);
       let hoverNode: RNode | null = null;
       let edgeBuilt = { v: -1, k: 0, x: 0, y: 0, hover: null as RNode | null };
       const litNode = () => hoverNode ?? (selRef.current != null ? byId.get(selRef.current) ?? null : null);
@@ -425,8 +458,8 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         };
         dirty = false;
 
-        g.clear(); cg.clear(); ug.clear(); uh.clear();
-        const ch = chRef.current; const chLog = Math.log1p(ch.max);
+        g.clear(); cg.clear(); ug.clear(); chN = 0; uhN = 0;
+        const chg = chRef.current; const chLog = Math.log1p(chg.max);
         const uc = ucRef.current; const ucLog = Math.log1p(uc.max);
         const uglows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
         const glows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
@@ -506,10 +539,10 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           const covered = { llm: 0, sql: 0 };
           // semantic zoom: hide inner-file structure until the file is big on screen
           const expand = !!n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PY));
-          const cv = ch.m?.get(d.id);
+          const cv = chg.m?.get(d.id);
           if (cv && !intro) {
             // folders, and files showing their functions, only get a faint border so the eye goes to the leaves
-            const faint = d.kind === 'folder' || (d.kind === 'file' && expand && n.children!.some((c) => ch.m!.has(c.data.id)));
+            const faint = d.kind === 'folder' || (d.kind === 'file' && expand && n.children!.some((c) => chg.m!.has(c.data.id)));
             glows.push({ x: x0, y: y0, w, h, s: Math.log1p(cv.a + cv.d) / chLog, added: cv.s === 'A', faint });
           }
           const uv = uc.m?.get(d.id);
@@ -541,27 +574,23 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         // changes overlay: soft halo (layered strokes, alpha falling off) + crisp inner white stroke, strength ~ log(lines)
         for (const q of glows) {
           if (q.faint) { cg.rect(q.x + 0.5, q.y + 0.5, Math.max(0, q.w - 1), Math.max(0, q.h - 1)).stroke({ width: 1, color: 0xffffff, alpha: 0.16 }); continue; }
-          const s = 0.3 + 0.7 * q.s, halo = 3 + 7 * s;
-          for (let i = 4; i >= 1; i--) {
-            const o = (halo * i) / 4;
-            cg.rect(q.x - o, q.y - o, q.w + 2 * o, q.h + 2 * o).stroke({ width: halo / 4 + 0.75, color: 0xffffff, alpha: (0.1 + 0.22 * s) * Math.pow(1 - (i - 1) / 4, 1.5) });
-          }
+          const s = 0.3 + 0.7 * q.s, hw = 3 + 7 * s;
+          halo(cgh, chPool, chN++, q.x, q.y, q.w, q.h, 1.4 * hw + 2, 0.17 + 0.36 * s);
           cg.rect(q.x + 0.75, q.y + 0.75, Math.max(0, q.w - 1.5), Math.max(0, q.h - 1.5)).stroke({ width: 2, color: 0xffffff, alpha: 0.85 + 0.15 * s });
           if (q.added && q.w > 10 && q.h > 10) cg.rect(q.x + 4, q.y + 4, q.w - 8, q.h - 8).stroke({ width: 1, color: 0xffffff, alpha: 0.6 }); // added: double stroke
         }
         // uncommitted overlay: brighter, wider halo than the committed glow; pulsed by the ticker
         for (const q of uglows) {
           if (q.faint) { ug.rect(q.x + 0.5, q.y + 0.5, Math.max(0, q.w - 1), Math.max(0, q.h - 1)).stroke({ width: 1, color: 0xffffff, alpha: 0.22 }); continue; }
-          const s = 0.35 + 0.65 * q.s, halo = 5 + 9 * s;
-          for (let i = 3; i >= 1; i--) {
-            const o = (halo * i) / 3;
-            uh.rect(q.x - o, q.y - o, q.w + 2 * o, q.h + 2 * o).stroke({ width: halo / 3 + 1, color: 0xffffff, alpha: (0.12 + 0.2 * s) * Math.pow(1 - (i - 1) / 3, 1.4) });
-          }
+          const s = 0.35 + 0.65 * q.s, hw = 5 + 9 * s;
+          halo(uh, uhPool, uhN++, q.x, q.y, q.w, q.h, 1.4 * hw + 2, 0.19 + 0.33 * s);
           ug.rect(q.x - 1.5, q.y - 1.5, q.w + 3, q.h + 3).stroke({ width: 3, color: 0xffffff, alpha: 0.35 + 0.25 * s });
           ug.rect(q.x + 0.75, q.y + 0.75, Math.max(0, q.w - 1.5), Math.max(0, q.h - 1.5)).stroke({ width: 2, color: 0xffffff, alpha: 0.95 });
           if (q.w > 6 && q.h > 6) ug.rect(q.x, q.y, q.w, q.h).fill({ color: 0xffffff, alpha: 0.06 + 0.06 * s });
           if (q.added && q.w > 10 && q.h > 10) ug.rect(q.x + 4, q.y + 4, q.w - 8, q.h - 8).stroke({ width: 1, color: 0xffffff, alpha: 0.6 });
         }
+        for (let i = chN; i < chPool.length; i++) chPool[i]!.visible = false;
+        for (let i = uhN; i < uhPool.length; i++) uhPool[i]!.visible = false;
         if (el.dataset.uncommittedDrawn !== String(uglows.length)) el.dataset.uncommittedDrawn = String(uglows.length); // test hook
         if (el.dataset.changedDrawn !== String(glows.length)) el.dataset.changedDrawn = String(glows.length); // test hook
         // persistent selection highlight
@@ -698,6 +727,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       window.addEventListener('keydown', onKey);
       window.addEventListener('resize', onResize);
       cleanup = () => {
+        glowTex.destroy(true);
         canvas.removeEventListener('wheel', onWheel);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
