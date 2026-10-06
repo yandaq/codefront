@@ -44,7 +44,8 @@ export function Tip({ id, children, className, block }: { id: TipId; children: R
     if (!open || !ref.current || !tipRef.current) return;
     const a = ref.current.getBoundingClientRect(), t = tipRef.current.getBoundingClientRect(), m = 8;
     let left = a.left - t.width - m, top = a.top + a.height / 2 - t.height / 2;
-    if (left < m) { left = Math.min(Math.max(m, a.left), innerWidth - t.width - m); top = a.top - t.height - m; }
+    if (left < m && a.right + m + t.width <= innerWidth - m) left = a.right + m; // no room on the left (e.g. top-left panel): open to the right
+    else if (left < m) { left = Math.min(Math.max(m, a.left), innerWidth - t.width - m); top = a.top - t.height - m; }
     top = Math.min(Math.max(m, top), innerHeight - t.height - m);
     setPos({ left, top });
   }, [open]);

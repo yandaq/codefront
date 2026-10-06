@@ -180,8 +180,10 @@ export function App() {
   return (
     <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-fill={layer}>
       {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} changes={changeAgg} />}
-      {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
+      {snap && <div className="pointer-events-none absolute bottom-8 left-3 top-32 flex flex-col items-start justify-start">
       <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} />
+      </div>}
+      {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
       <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
         cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals}
         coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />
