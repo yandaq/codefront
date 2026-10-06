@@ -31,6 +31,8 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       });
       const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
       await page.goto(url);
+      // fresh browser profile: default view is medium exploded
+      await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>('[data-treemap]')?.dataset.exploded)).toBe('1');
       const tiles = () => page.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0));
       await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
       // dive root -> src -> big.ts (the file dominates the canvas, so its centre stays under the cursor)
@@ -41,6 +43,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       // a single double-click from the overview on a deep file lands straight on that file
       // (wide viewport so the inspector opened by the first click doesn't cover the deep file)
       const p2 = await browser.newPage({ viewport: { width: 2000, height: 800 } });
+      await p2.addInitScript(() => localStorage.setItem('grim.exploded', '0'));
       await p2.goto(url);
       await p2.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
       await p2.waitForTimeout(1500);
@@ -51,6 +54,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       expect(await p2.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0))).toBeGreaterThan(0);
       // Tab cycles the exploded view (off -> medium -> large -> off): tiles keep their size and order, folders drift apart
       const p3 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await p3.addInitScript(() => localStorage.setItem('grim.exploded', '0'));
       await p3.goto(url);
       await p3.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
       // layer dock help tooltip: hover a row, glass tooltip appears; Esc dismisses it

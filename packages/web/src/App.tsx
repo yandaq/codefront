@@ -52,7 +52,7 @@ export function App() {
   const [peek, setPeek] = useState<PeekReq | null>(null);
   const [palette, setPalette] = useState(false);
   // exploded view level: 0 off, 1 medium, 2 large (Tab cycles forward, Shift+Tab back)
-  const [exploded, setExploded] = useState(() => { try { const v = Number(localStorage.getItem('grim.exploded')); return v === 1 || v === 2 ? v : 0; } catch { return 0; } });
+  const [exploded, setExploded] = useState(() => { try { const raw = localStorage.getItem('grim.exploded'); if (raw == null) return 1; const v = Number(raw); return v === 0 || v === 2 ? v : 1; } catch { return 1; } });
   useEffect(() => { try { localStorage.setItem('grim.exploded', String(exploded)); } catch { /* storage blocked */ } }, [exploded]);
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
