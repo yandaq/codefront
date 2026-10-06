@@ -223,7 +223,7 @@ export function App() {
           </form>
         )}
         {crumbs.length > 0 && (
-          <nav className="glass pointer-events-auto flex w-fit items-center gap-1 rounded-lg px-3 py-1.5 font-mono text-xs">
+          <nav data-focus={crumbs[crumbs.length - 1]?.id} className="glass pointer-events-auto flex w-fit items-center gap-1 rounded-lg px-3 py-1.5 font-mono text-xs">
             {crumbs.map((c, i) => (
               <span key={c.id + i} className="flex items-center gap-1">
                 {i > 0 && <span className="text-slate-600">/</span>}

@@ -35,8 +35,9 @@ const LABEL_H = 16;
 const DETAIL_PX = 60; // a file must be this wide on screen before its classes/functions appear
 const DETAIL_PY = 36; // ...and this tall
 
-const LANG_COLOURS: Record<string, number> = { typescript: 0x3b82f6, tsx: 0x0ea5e9, javascript: 0xeab308, python: 0x22c55e };
-const KIND_COLOURS: Record<string, number> = { class: 0x8b5cf6, function: 0x22d3ee, 'module-scope': 0x334155, 'small-group': 0x475569 };
+// Files: muted, desaturated per-language tones. Inner tiles: bright, distinct hues (mint functions, violet classes) so they pop on #0a0e17.
+const LANG_COLOURS: Record<string, number> = { typescript: 0x3e5f8a, tsx: 0x46708f, javascript: 0x8a7c3e, python: 0x4b7a58, go: 0x3f7f86, java: 0x8a5a3e, c_sharp: 0x6a4f8a, rust: 0x8a4e3e };
+const KIND_COLOURS: Record<string, number> = { class: 0xc084fc, function: 0x34f5b5, 'module-scope': 0x2b3646, 'small-group': 0x5b6b80 };
 
 function colourFor(n: RNode): number {
   const d = n.data;
@@ -528,9 +529,12 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         const r = canvas.getBoundingClientRect();
         const w = toWorld(e.clientX - r.left, e.clientY - r.top);
         const path = hit(w.x, w.y);
-        const idx = path.indexOf(focus);
-        const next = idx >= 0 ? path[idx + 1] : path[1];
-        if (next) flyTo(next);
+        // target the deepest node drawn under the cursor; entering a file from outside lands on the file first
+        let target = pickAt(e.clientX - r.left, e.clientY - r.top);
+        const file = target.ancestors().find((a) => a.data.kind === 'file');
+        if (file && file !== target && !focus.ancestors().includes(file)) target = file;
+        if (target === focus || target === laid) { const idx = path.indexOf(focus); const next = idx >= 0 ? path[idx + 1] : path[1]; if (next) target = next; else return; }
+        flyTo(target);
       };
       const up = () => { if (focus.parent) flyTo(focus.parent); };
       const onContext = (e: MouseEvent) => { e.preventDefault(); up(); };

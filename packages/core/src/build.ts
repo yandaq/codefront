@@ -11,7 +11,7 @@ export function buildFileChildren(filePath: string, lines: boolean[], items: Ite
     const node: TreeNode = { id, name: it.name, kind: it.kind, path: filePath, sloc: 0, language: lang, startLine: it.startLine + 1, endLine: it.endLine + 1 };
     if (it.cx != null) node.cx = it.cx;
     for (let l = it.startLine; l <= it.endLine && l < lines.length; l++) owner[l] = node;
-    if (it.children.length && depth < 2) node.children = it.children.map((c) => make(c, id, depth + 1));
+    if (it.children.length && depth < 3) node.children = it.children.map((c) => make(c, id, depth + 1));
     return node;
   };
   const top = items.map((it) => make(it, filePath, 0));
@@ -21,7 +21,7 @@ export function buildFileChildren(filePath: string, lines: boolean[], items: Ite
     if (n.children?.length) {
       n.children = n.children.map(finish);
       const own = n.sloc;
-      if (own > 0) n.children.push({ id: `${n.id}#scope`, name: 'class scope', kind: 'module-scope', path: filePath, sloc: own });
+      if (own > 0) n.children.push({ id: `${n.id}#scope`, name: n.kind === 'class' ? 'class scope' : `${n.name} body`, kind: 'module-scope', path: filePath, sloc: own });
       n.sloc = n.children.reduce((a, c) => a + c.sloc, 0);
       n.children = aggregateSmall(n.children.filter((c) => c.sloc > 0), n.id, filePath);
     }

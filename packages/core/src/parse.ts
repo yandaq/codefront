@@ -1,10 +1,43 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import Parser from 'web-tree-sitter';
-import { cognitiveComplexity } from './complexity.js';
+import { cognitiveComplexity, isNamedFunction } from './complexity.js';
 
-/** Displayed complexity: max over the function's own score and its merged named inner functions (each scored separately). */
-function cxOf(n: Parser.SyntaxNode): number { const inner: number[] = []; return Math.max(cognitiveComplexity(n, inner), ...inner); }
+/** Displayed complexity: the function's own score; at the depth cap (inner named functions merged) the max over merged inners too. */
+function cxOf(n: Parser.SyntaxNode, merged = true): number { const inner: number[] = []; const own = cognitiveComplexity(n, inner); return merged ? Math.max(own, ...inner) : own; }
+
+/** Max levels of items inside a file (File→Class→Method; deeper named functions merge into their level-3 ancestor). */
+const MAX_DEPTH = 3;
+
+function innerName(fn: Parser.SyntaxNode): string {
+  const own = fn.childForFieldName('name')?.text;
+  if (own) return own;
+  const p = fn.parent;
+  if (!p) return '(anonymous)';
+  return (p.childForFieldName('name') ?? p.childForFieldName('key') ?? p.childForFieldName('property'))?.text ?? '(anonymous)';
+}
+
+/** Named inner functions (option-2 set) directly owned by fn (not nested inside another named function). */
+function innerItems(fn: Parser.SyntaxNode, depth: number): Item[] {
+  const out: Item[] = [];
+  const walk = (n: Parser.SyntaxNode) => {
+    for (const c of n.namedChildren) {
+      if (isNamedFunction(c)) {
+        const span = NAMING_WRAP.has(c.parent?.type ?? '') ? c.parent! : c;
+        out.push(fnItem(c, innerName(c), { startLine: span.startPosition.row, endLine: span.endPosition.row }, depth + 1));
+      } else walk(c);
+    }
+  };
+  walk(fn);
+  return out;
+}
+const NAMING_WRAP = new Set(['variable_declarator', 'pair', 'public_field_definition', 'field_definition']);
+
+/** Build a function Item at `depth` (0 = top level in file), with named inner functions as children below the cap. */
+function fnItem(fnNode: Parser.SyntaxNode, name: string, span: { startLine: number; endLine: number }, depth: number): Item {
+  const children = depth + 1 < MAX_DEPTH ? innerItems(fnNode, depth) : [];
+  return { kind: 'function', name, ...span, children, cx: cxOf(fnNode, depth + 1 >= MAX_DEPTH) };
+}
 
 const require = createRequire(import.meta.url);
 const wasmDir = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out');
@@ -89,23 +122,23 @@ function toItem(n: N, depth: number): Item | null {
     const body = node.childForFieldName('body');
     if (node.type === 'mod_item' && !body) return null; // `mod foo;` declaration
     const children: Item[] = [];
-    if (body && depth < 2) for (const c of body.namedChildren) { const it = toItem(c, depth + 1); if (it) children.push(it); }
+    if (body && depth + 1 < MAX_DEPTH) for (const c of body.namedChildren) { const it = toItem(c, depth + 1); if (it) children.push(it); }
     return { kind: 'class', name: nameOf(node, '(anonymous class)'), ...span, children };
   }
-  if (FN_TYPES.has(node.type)) return { kind: 'function', name: nameOf(node, '(anonymous)'), ...span, children: [], cx: cxOf(node) };
+  if (FN_TYPES.has(node.type)) return fnItem(node, nameOf(node, '(anonymous)'), span, depth);
   // const foo = () => {} / class field foo = () => {}
   if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
     const decls = node.namedChildren.filter((c) => c.type === 'variable_declarator');
     if (decls.length === 1) {
       const v = decls[0]!.childForFieldName('value');
-      if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: nameOf(decls[0]!, '(anonymous)'), ...span, children: [], cx: cxOf(v) };
+      if (v && FN_VALUE.has(v.type)) return fnItem(v, nameOf(decls[0]!, '(anonymous)'), span, depth);
       if (v && CLASS_TYPES.has(v.type)) { const it = toItem(v, depth); if (it) { it.name = nameOf(decls[0]!, it.name); Object.assign(it, span); } return it; }
     }
     return null;
   }
   if (node.type === 'public_field_definition' || node.type === 'field_definition') {
     const v = node.childForFieldName('value');
-    if (v && FN_VALUE.has(v.type)) return { kind: 'function', name: (node.childForFieldName('name') ?? node.childForFieldName('property'))?.text ?? '(field)', ...span, children: [], cx: cxOf(v) };
+    if (v && FN_VALUE.has(v.type)) return fnItem(v, (node.childForFieldName('name') ?? node.childForFieldName('property'))?.text ?? '(field)', span, depth);
   }
   return null;
 }

@@ -18,6 +18,8 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
     mkdirSync(path.join(dir, 'src'));
     const fns = Array.from({ length: 4 }, (_, i) => `export function f${i}(x: number) {\n${'  x = x + 1;\n'.repeat(20)}  return x;\n}\n`).join('\n');
     writeFileSync(path.join(dir, 'src', 'big.ts'), `export class K {\n  m() { return 1; }\n}\n${fns}`);
+    mkdirSync(path.join(dir, 'deep/a/b/c'), { recursive: true });
+    writeFileSync(path.join(dir, 'deep/a/b/c/deep.ts'), Array.from({ length: 3 }, (_, i) => `export function d${i}(x: number) {\n${'  x = x + 1;\n'.repeat(12)}  return x;\n}\n`).join('\n'));
     writeFileSync(path.join(dir, 'small.ts'), 'export const y = 1;\n');
     const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     const browser = await chromium.launch();
@@ -36,6 +38,17 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       for (let i = 0; i < 2; i++) { await page.mouse.dblclick(box.x + box.width * 0.4, box.y + box.height / 2); await page.waitForTimeout(1000); }
       await expect.poll(() => page.evaluate(() => document.body.innerText.includes('big.ts'))).toBe(true);
       expect(await tiles()).toBeGreaterThan(0);
+      // a single double-click from the overview on a deep file lands straight on that file
+      // (wide viewport so the inspector opened by the first click doesn't cover the deep file)
+      const p2 = await browser.newPage({ viewport: { width: 2000, height: 800 } });
+      await p2.goto(url);
+      await p2.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
+      await p2.waitForTimeout(1500);
+      const b2 = (await p2.locator('canvas').boundingBox())!;
+      await p2.mouse.dblclick(b2.x + b2.width * 0.72, b2.y + b2.height * 0.3);
+      await expect.poll(() => p2.evaluate(() => document.querySelector<HTMLElement>('[data-focus]')?.dataset.focus)).toBe('deep/a/b/c/deep.ts');
+      await p2.waitForTimeout(1000);
+      expect(await p2.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0))).toBeGreaterThan(0);
     } finally {
       await browser.close();
       srv.kill();

@@ -26,7 +26,7 @@ A local-first codebase visualisation tool. The user points it at a local path or
 - Import resolution: full for TS/JS and Python; best-effort for others.
 
 ## 4. Treemap model
-- Hierarchy: Folder → File → Class/Module → Function/Method. Nested functions merge into parent. Max 3 levels inside a file.
+- Hierarchy: Folder → File → Class/Module → Function/Method. Named inner functions (declarations, named function expressions, arrow/function expressions assigned to a const/let/var, object property or class field) become child tiles, with a dimmed "<name> body" tile for the parent's own lines; anonymous callbacks (incl. inline JSX arrows) merge into their parent. Max 3 levels inside a file: anything deeper merges into its level-3 ancestor. Each function's complexity is its own score (at the depth cap it is the max over merged named inners). "n small functions" aggregation applies at every level.
 - Size = SLOC (non-blank, non-comment) via tree-sitter comment nodes; `scc`-style counting fallback.
 - Top-level code outside functions → a dimmed "module scope" square so children sum to file size.
 - Docs/config (md, json, yaml, images…) hidden by default (toggle "Show docs/config"). Lockfiles, `dist/`, `*.min.*`, `*.generated.*`, `linguist-generated` always excluded. Respect `.gitignore`; skip `node_modules`, vendored, binaries.

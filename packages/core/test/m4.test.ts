@@ -95,7 +95,7 @@ describe('coupling in snapshot', () => {
 
 describe('complexity option 2: named inner functions scored separately', () => {
   const items = async (src: string, lang: 'typescript' | 'python') => Object.fromEntries((await parseSource(src, lang)).items.map((i) => [i.name, i.cx]));
-  it('TS: named inners excluded from parent, anonymous callbacks included; displayed = max', async () => {
+  it('TS: named inners excluded from parent, anonymous callbacks included; each node shows its own score', async () => {
     const r = await items(`
 function outer(xs: number[]) {
   if (xs) {}                                   // +1
@@ -104,7 +104,9 @@ function outer(xs: number[]) {
   const helper = (b: number) => b ? 1 : 0;     // named arrow: 1 (separate)
   const o = { m: () => { if (xs) {} } };       // object property: separate
 }`, 'typescript');
-    expect(r.outer).toBe(7); // own = 3, max with inner 7
+    expect(r.outer).toBe(3); // own score; inners are separate child tiles now
+    const kids = Object.fromEntries((await parseSource(`function outer(a: number) { function inner() { if (a) { if (a) {} } } }`, 'typescript')).items[0]!.children.map((c) => [c.name, c.cx]));
+    expect(kids.inner).toBe(3);
   });
   it('own score excludes named inners', async () => {
     const r = await parseSource(`function outer(x) { if (x) {} function inner() { if (x) {} } }`, 'javascript');

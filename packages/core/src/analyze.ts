@@ -9,7 +9,7 @@ import { detectSource, detectFile } from './detect.js';
 export interface FileAnalysis { node: TreeNode; hits: Hit[]; imports: ImportRef[]; parsed: boolean }
 
 /** Bump when analysis output changes shape/semantics to invalidate on-disk caches. */
-export const ANALYSIS_VERSION = 2;
+export const ANALYSIS_VERSION = 3;
 
 export function plainFile(rel: string, text: string): TreeNode {
   const sloc = codeLines(text, fallbackComments(text, rel)).filter(Boolean).length;
