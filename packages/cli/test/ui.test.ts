@@ -127,6 +127,14 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       await expect.poll(() => page.locator('[data-fill]').getAttribute('data-fill')).toBe('complexity');
       await page.locator('[data-changes-clear]').click();
       await expect.poll(changed).toBe(0);
+      // Fetch button: absent without a remote, present (and working) once one exists
+      expect(await page.locator('[data-git-fetch]').count()).toBe(0);
+      const bare = mkdtempSync(path.join(tmpdir(), 'grim-ui-bare-'));
+      execFileSync('git', ['init', '-q', '--bare', bare]);
+      git('remote', 'add', 'origin', bare); git('push', '-q', 'origin', 'main');
+      await page.reload();
+      await page.locator('[data-git-fetch]').click();
+      await expect.poll(() => page.locator('[data-fetch-result]').textContent(), { timeout: 15000 }).toContain('origin:');
     } finally {
       await browser.close();
       srv.kill();

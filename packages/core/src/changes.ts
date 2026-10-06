@@ -26,18 +26,22 @@ export async function resolveRef(root: string, ref: string): Promise<string> {
   catch { throw new Error(`unknown ref: ${ref}`); }
 }
 
-export interface GitBranches { git: boolean; branches: string[]; current: string | null }
+export interface GitBranches { git: boolean; branches: string[]; current: string | null; remotes: string[] }
 /** Local branches (current first default); for clones of remotes, the remote's branches (as the M6 picker lists them). */
 export async function gitBranches(root: string, remote = false): Promise<GitBranches> {
-  try { await git(root, ['rev-parse', '--is-inside-work-tree']); } catch { return { git: false, branches: [], current: null }; }
+  try { await git(root, ['rev-parse', '--is-inside-work-tree']); } catch { return { git: false, branches: [], current: null, remotes: [] }; }
   let current: string | null = null;
   try { current = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim(); if (current === 'HEAD') current = null; } catch { /* no commits */ }
   let branches: string[] = [];
   if (remote) { try { branches = (await listBranches(root)).map((b) => (b === current ? b : `origin/${b}`)); } catch { /* none */ } }
   const local = (await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']).catch(() => '')).split('\n').filter(Boolean);
+  // Local repos: remote-tracking branches (origin/*) too, so fetched history can be browsed.
+  if (!remote) branches = (await git(root, ['for-each-ref', '--format=%(refname)', 'refs/remotes']).catch(() => '')).split('\n')
+    .filter((l) => l && !l.endsWith('/HEAD')).map((l) => l.replace(/^refs\/remotes\//, ''));
+  const remotes = (await git(root, ['remote']).catch(() => '')).split('\n').map((s) => s.trim()).filter(Boolean);
   branches = [...new Set([...local, ...branches])];
   if (current && !branches.includes(current)) branches.unshift(current);
-  return { git: true, branches, current };
+  return { git: true, branches, current, remotes };
 }
 
 export interface CommitInfo { sha: string; parents: string[]; subject: string; author: string; date: number; added: number; deleted: number }

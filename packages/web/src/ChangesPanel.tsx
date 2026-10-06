@@ -39,12 +39,41 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [fetching, setFetching] = useState<{ msg: string; pct: number } | null>(null);
+  const [fetchMsg, setFetchMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const loadBranches = useCallback((keep?: string) => fetch(`/api/git/branches?root=${encodeURIComponent(root)}`).then((r) => r.json()).then((b) => {
+    const list: string[] = b.branches ?? [];
+    setGit(!!b.git); setBranches(list); setRemotes(b.remotes ?? []);
+    const next: string = keep && list.includes(keep) ? keep : b.current ?? list[0] ?? 'HEAD';
+    setBranch(next); return next;
+  }), [root]);
   useEffect(() => {
     if (!snap.git?.available) { setGit(false); return; }
-    fetch(`/api/git/branches?root=${encodeURIComponent(root)}`).then((r) => r.json()).then((b) => {
-      setGit(!!b.git); setBranches(b.branches ?? []); setBranch(b.current ?? b.branches?.[0] ?? 'HEAD');
-    }).catch(() => setGit(false));
-  }, [root, snap.git?.available]);
+    loadBranches().catch(() => setGit(false));
+  }, [root, snap.git?.available, loadBranches]);
+
+  const canFetch = snap.source.type !== 'remote' && remotes.length > 0;
+  const doFetch = async () => {
+    if (fetching) return;
+    setFetching({ msg: 'connecting', pct: 0 }); setFetchMsg(null);
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/progress`);
+    ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.stage === 'fetch' && m.root === root) setFetching({ msg: m.message ?? '', pct: m.done / (m.total || 100) }); } catch { /* ignore */ } };
+    try {
+      const r = await fetch(`/api/git/fetch?root=${encodeURIComponent(root)}`, { method: 'POST' });
+      const b = await r.json();
+      if (!r.ok) throw new Error(b.error);
+      const by = (xs: string[], n: string) => xs.filter((x) => x.startsWith(n + '/')).length;
+      const parts = (b.remotes as { name: string; ok: boolean; error?: string; authHint?: string }[]).map((x) => x.ok
+        ? `${x.name}: ${by(b.updated, x.name)} updated, ${by(b.added, x.name)} new, ${by(b.pruned, x.name)} pruned`
+        : `${x.name}: ${x.error}${x.authHint ? ` (for https, run \`gh auth login\` or rescan ${x.authHint} as a URL to save an access token)` : ''}`);
+      setFetchMsg({ ok: b.remotes.every((x: { ok: boolean }) => x.ok), text: parts.join(' · ') || 'no remotes' });
+      const keepSel = sel && commits[sel.a] ? commits[sel.a]!.sha : null;
+      const cur = branch;
+      if ((await loadBranches(cur)) === cur) await loadMoreReset(keepSel);
+    } catch (e) { setFetchMsg({ ok: false, text: String((e as Error).message) }); }
+    finally { ws.close(); setFetching(null); }
+  };
 
   const loadMore = useCallback(async (reset = false) => {
     if (!branch || loadingMore.current || (!reset && done)) return;
@@ -58,7 +87,15 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
       setDone(b.commits.length < PAGE);
     } catch (e) { setErr(String((e as Error).message)); } finally { loadingMore.current = false; }
   }, [root, branch, commits.length, done]);
-  useEffect(() => { setSel(null); setCommits([]); setDone(false); if (branch) loadMore(true); }, [branch, root]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSel(null); setCommits([]); setDone(false); if (branch) loadMore(true); }, [branch, root]);
+  // After a fetch: reload the first page, keeping the selected commit if it is still listed.
+  const loadMoreReset = async (keepSha: string | null) => {
+    const r = await fetch(`/api/commits?${new URLSearchParams({ root, branch, offset: '0', limit: String(PAGE) })}`);
+    const b = await r.json(); if (!r.ok) return;
+    setCommits(b.commits); setDone(b.commits.length < PAGE);
+    const i = keepSha ? (b.commits as CommitInfo[]).findIndex((c) => c.sha === keepSha) : -1;
+    setSel((s) => (i >= 0 && s && s.b == null ? { a: i } : i >= 0 ? s : null));
+  }; // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch the diff for the selection (refetched when the snapshot changes: the server cache is per snapshot).
   useEffect(() => {
@@ -99,11 +136,18 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
       {open && git === false && <div className="mt-2 text-slate-500">No git history</div>}
       {open && git && (
         <>
-          <Tip id="changesBranch" block className="mt-2">
-            <select aria-label="changes branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="w-full rounded border border-cyan-400/20 bg-slate-950/60 px-2 py-1 text-slate-200">
-              {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </Tip>
+          <div className="mt-2 flex items-center gap-2">
+            <Tip id="changesBranch" block className="min-w-0 flex-1">
+              <select aria-label="changes branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="w-full rounded border border-cyan-400/20 bg-slate-950/60 px-2 py-1 text-slate-200">
+                {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </Tip>
+            {canFetch && <Tip id="changesFetch" className="shrink-0"><button data-git-fetch onClick={doFetch} disabled={!!fetching}
+              className="flex items-center gap-1 whitespace-nowrap rounded border border-cyan-400/30 px-2 py-1 text-[11px] text-cyan-200 hover:border-cyan-300/60 disabled:opacity-60">
+              <span className={fetching ? 'inline-block animate-spin' : ''}>⟳</span> Fetch</button></Tip>}
+          </div>
+          {fetching && <div data-fetch-progress className="mt-1 truncate text-[10px] text-cyan-200/80">{fetching.msg} {Math.round(fetching.pct * 100)}%</div>}
+          {fetchMsg && <div data-fetch-result className={`mt-1 flex gap-1 text-[10px] ${fetchMsg.ok ? 'text-emerald-300' : 'text-rose-300'}`}><span className="min-w-0 flex-1 break-words">{fetchMsg.text}</span><button aria-label="dismiss" className="text-slate-500 hover:text-slate-300" onClick={() => setFetchMsg(null)}>×</button></div>}
           <Tip id="changesCommits" block className="mt-2 flex min-h-[76px] shrink flex-col" >
             <div ref={listRef} data-commit-list onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="h-56 min-h-[76px] shrink overflow-y-auto rounded border border-slate-700/60 bg-slate-950/40">
               <div style={{ height: commits.length * ROW, position: 'relative' }}>

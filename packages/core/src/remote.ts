@@ -118,9 +118,9 @@ export async function gitEnv(info: Pick<RemoteInfo, 'cloneUrl' | 'host'>): Promi
 
 export const repoDir = (info: Pick<RemoteInfo, 'id'>) => path.join(grimHome(), 'repos', info.id);
 
-function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, onLine?: (l: string) => void): Promise<string> {
+function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, onLine?: (l: string) => void, timeout?: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const p = spawn('git', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('git', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], timeout, killSignal: 'SIGKILL' });
     let out = '', err = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d: Buffer) => {
@@ -129,7 +129,7 @@ function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, onLine?: (l
       if (onLine) for (const l of t.split(/[\r\n]+/)) if (l.trim()) onLine(l.trim());
     });
     p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve(out) : reject(new Error(cleanGitError(err) || `git ${args[0]} failed (${code})`))));
+    p.on('close', (code, sig) => (sig && timeout ? reject(new Error(`git ${args[0]} timed out after ${Math.round(timeout / 1000)}s`)) : code === 0 ? resolve(out) : reject(new Error(cleanGitError(err) || `git ${args[0]} failed (${code})`))));
   });
 }
 const cleanGitError = (e: string) => e.split('\n').filter((l) => /fatal|error|denied|not found|could not/i.test(l)).join('\n').replace(/Authorization: Basic \S+/g, 'Authorization: ***').trim();
@@ -181,4 +181,68 @@ export async function checkoutBranch(dir: string, info: RemoteInfo, branch: stri
   if (fetch) await runGit(['fetch', '--prune', '--no-tags', 'origin'], dir, env);
   await runGit(['checkout', '-q', '-f', '-B', branch, `origin/${branch}`], dir, env);
   await runGit(['reset', '-q', '--hard', `origin/${branch}`], dir, env);
+}
+
+// ---------------- fetch (local repos) ----------------
+
+export interface FetchSummary {
+  remotes: { name: string; url: string; ok: boolean; error?: string; authHint?: string }[];
+  added: string[]; updated: string[]; pruned: string[];
+}
+
+async function remoteRefs(dir: string): Promise<Map<string, string>> {
+  const { stdout } = await exec('git', ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/remotes'], { cwd: dir });
+  const m = new Map<string, string>();
+  for (const l of stdout.split('\n')) { const i = l.indexOf(' '); if (i > 0 && !l.endsWith('/HEAD')) m.set(l.slice(i + 1).replace(/^refs\/remotes\//, ''), l.slice(0, i)); }
+  return m;
+}
+
+export async function listRemotes(dir: string): Promise<{ name: string; url: string }[]> {
+  try {
+    const { stdout } = await exec('git', ['remote'], { cwd: dir });
+    const names = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    return await Promise.all(names.map(async (name) => ({ name, url: (await exec('git', ['remote', 'get-url', '--', name], { cwd: dir }).catch(() => ({ stdout: '' }))).stdout.trim() })));
+  } catch { return []; }
+}
+
+/**
+ * FETCH ONLY: `git fetch --prune` for every remote (equivalent to `--all --prune`). Updates refs/remotes only —
+ * never the work tree, index, local branches or HEAD. Hooks are disabled and prompts off; https remotes get the
+ * M6 token injection (gh / keychain PAT), SSH and the user's credential helper work as usual.
+ */
+export async function fetchRemotes(dir: string, opts: { onProgress?: (msg: string, pct: number) => void; timeoutMs?: number } = {}): Promise<FetchSummary> {
+  const remotes = await listRemotes(dir);
+  const before = await remoteRefs(dir);
+  const res: FetchSummary = { remotes: [], added: [], updated: [], pruned: [] };
+  const phases = ['Counting objects', 'Compressing objects', 'Receiving objects', 'Resolving deltas'];
+  const deadline = Date.now() + (opts.timeoutMs ?? 120_000);
+  for (const [i, r] of remotes.entries()) {
+    let info: Pick<RemoteInfo, 'cloneUrl' | 'host'> = { cloneUrl: r.url, host: '' };
+    try { if (isGitUrl(r.url)) { const p = parseGitUrl(r.url); info = { cloneUrl: r.url, host: p.host }; } } catch { /* local path etc. */ }
+    const env = await gitEnv(info);
+    // gitEnv blocks the file protocol (for untrusted clones); a user's own local-path remote is legitimate here.
+    for (let k = 0; k < Number(env.GIT_CONFIG_COUNT); k++) if (env[`GIT_CONFIG_KEY_${k}`] === 'protocol.file.allow') env[`GIT_CONFIG_VALUE_${k}`] = 'always';
+    const onLine = (l: string) => {
+      const p = gitProgress(l); if (!p) return;
+      const ix = Math.max(0, phases.indexOf(p.phase));
+      opts.onProgress?.(`${r.name}: ${p.phase}`, (i + (ix + p.pct) / phases.length) / remotes.length);
+    };
+    opts.onProgress?.(`${r.name}: connecting`, i / remotes.length);
+    const args = (fh: boolean) => ['fetch', '--prune', '--progress', ...(fh ? ['--no-write-fetch-head'] : []), '--', r.name];
+    const left = Math.max(1000, deadline - Date.now());
+    try {
+      try { await runGit(args(true), dir, env, onLine, left); }
+      catch (e) { if (!/no-write-fetch-head|unknown option/i.test(String((e as Error).message))) throw e; await runGit(args(false), dir, env, onLine, left); }
+      res.remotes.push({ ...r, ok: true });
+    } catch (e) {
+      const msg = String((e as Error).message);
+      const auth = /auth|denied|403|401|could not read Username|terminal prompts disabled/i.test(msg);
+      res.remotes.push({ ...r, ok: false, error: msg, authHint: auth && info.host ? info.host : undefined });
+    }
+  }
+  const after = await remoteRefs(dir);
+  for (const [k, v] of after) { const o = before.get(k); if (o == null) res.added.push(k); else if (o !== v) res.updated.push(k); }
+  for (const k of before.keys()) if (!after.has(k)) res.pruned.push(k);
+  opts.onProgress?.('done', 1);
+  return res;
 }

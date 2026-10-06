@@ -1,7 +1,7 @@
 import { STAGES, type Stage } from '@grim-repo/schema';
 import type { LayerId } from './layers';
 
-const LABEL: Record<Stage, string> = { clone: 'clone', walk: 'walk', sloc: 'SLOC', git: 'git history', parse: 'parse', detect: 'detectors', coverage: 'coverage', blame: 'blame' };
+const LABEL: Record<Stage, string> = { clone: 'clone', walk: 'walk', sloc: 'SLOC', git: 'git history', parse: 'parse', detect: 'detectors', coverage: 'coverage', blame: 'blame', fetch: 'fetch' };
 
 /** Which layers wait on which scan stages (for the layer dock's progress rings). */
 export function stageLoading(st: Partial<Record<Stage, number>>): Partial<Record<LayerId, number>> {
@@ -25,7 +25,7 @@ function Ring({ p }: { p: number }) {
 
 /** Top status bar: per-stage progress rings while a scan runs. */
 export function StatusBar({ stages, message }: { stages: Partial<Record<Stage, number>>; message?: string }) {
-  const shown = STAGES.filter((s) => s !== 'blame' && (s !== 'clone' || stages.clone != null));
+  const shown = STAGES.filter((s) => s !== 'blame' && s !== 'fetch' && (s !== 'clone' || stages.clone != null));
   return (
     <div data-testid="status-bar" className="glass pointer-events-auto flex w-fit flex-wrap items-center gap-3 rounded-lg px-3 py-1.5 font-mono text-[11px] text-slate-400">
       {shown.map((s) => {

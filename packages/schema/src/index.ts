@@ -138,7 +138,7 @@ export const ScanRequestSchema = z.object({ path: z.string().min(1), showDocs: z
   fetch: z.boolean().optional() });
 export type ScanRequest = z.infer<typeof ScanRequestSchema>;
 
-export const STAGES = ['clone', 'walk', 'sloc', 'git', 'parse', 'detect', 'coverage', 'blame'] as const;
+export const STAGES = ['clone', 'walk', 'sloc', 'git', 'parse', 'detect', 'coverage', 'blame', 'fetch'] as const;
 export type Stage = (typeof STAGES)[number];
 export interface ScanProgress { stage: Stage | 'done'; done: number; total: number; root?: string; message?: string }
 

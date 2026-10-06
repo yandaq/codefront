@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWs from '@fastify/websocket';
 import {
   scanTarget, blameTree, isGitUrl, parseGitUrl, localRepoId, RepoCache, listBranches, repoDir, liteSnapshot, findFile,
-  loadKeytar, savePat, ignoreFilter, gitBranches, listCommits, diffRange, refShapeOk, EMPTY_TREE, type ResolvedTarget, type DiffResult,
+  loadKeytar, savePat, ignoreFilter, gitBranches, listCommits, diffRange, refShapeOk, EMPTY_TREE, fetchRemotes, listRemotes, type ResolvedTarget, type DiffResult,
 } from '@grim-repo/core';
 import { ScanRequestSchema, type ProgressMessage, type Snapshot, type ScanRequest } from '@grim-repo/schema';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
@@ -167,6 +167,28 @@ export async function startServer(opts: ServerOptions = {}) {
     const t = scanned(req.query.root);
     if (!t) return reply.code(404).send({ error: 'scan first' });
     return gitBranches(t.abs, t.s.source.type === 'remote');
+  });
+  app.get<{ Querystring: { root?: string } }>('/api/git/remotes', async (req, reply) => {
+    const t = scanned(req.query.root);
+    if (!t) return reply.code(404).send({ error: 'scan first' });
+    const remotes = t.s.git?.available ? await listRemotes(t.abs) : [];
+    return { remotes: remotes.map((r) => r.name), local: t.s.source.type !== 'remote' };
+  });
+  // Fetch only (local repos): updates remote-tracking refs, never the work tree / index / local branches / HEAD.
+  const fetching = new Map<string, Promise<unknown>>();
+  app.post<{ Querystring: { root?: string } }>('/api/git/fetch', async (req, reply) => {
+    const t = scanned(req.query.root);
+    if (!t) return reply.code(404).send({ error: 'scan first' });
+    if (t.s.source.type === 'remote') return reply.code(400).send({ error: 'cloned remotes are fetched by Rescan' });
+    if (!t.s.git?.available) return reply.code(400).send({ error: 'not a git repo' });
+    const root = t.s.source.path;
+    let p = fetching.get(t.abs);
+    if (!p) {
+      p = fetchRemotes(t.abs, { timeoutMs: 120_000, onProgress: (message, pct) => send({ stage: 'fetch', done: Math.round(pct * 100), total: 100, root, message }) })
+        .finally(() => { fetching.delete(t.abs); diffCache.delete(t.s); });
+      fetching.set(t.abs, p);
+    }
+    try { const r = await p; log(`fetch ${t.abs}`); return r; } catch (e) { return reply.code(500).send(fail(e)); }
   });
   app.get<{ Querystring: { root?: string; branch?: string; offset?: string; limit?: string } }>('/api/commits', async (req, reply) => {
     const t = scanned(req.query.root);
