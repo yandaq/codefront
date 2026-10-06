@@ -9,7 +9,7 @@ const JS_EXT = ['.ts', '.tsx', '.mts', '.cts', '.d.ts', '.js', '.jsx', '.mjs', '
 function readJson(abs: string): any {
   try {
     const t = readFileSync(abs, 'utf8')
-      .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m, s) => s ?? '') // strip comments, keep strings
+      .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, s: string | undefined) => s ?? '') // strip comments, keep strings
       .replace(/,(\s*[}\]])/g, '$1');
     return JSON.parse(t);
   } catch { return null; }

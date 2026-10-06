@@ -111,7 +111,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
     version: 1, createdAt: new Date().toISOString(), source: { type: 'local', path: root },
     stats: { files: fileCount, sloc: rootNode.sloc, parsedFiles: parsed, durationMs: Date.now() - t0 },
     root: rootNode,
-    git: { available: hist.available, commits: hist.commits, head: hist.head },
+    git: { available: hist.available, commits: hist.commits, head: hist.head, authors: hist.authors, commitAuthors: hist.commitAuthors },
     coverage,
     hits,
     coupling: { files: [...ix.keys()], ...coupling },

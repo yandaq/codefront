@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { safeFilePath } from './safe.js';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWs from '@fastify/websocket';
@@ -30,6 +32,7 @@ export async function startServer(opts: ServerOptions = {}) {
     const key = `${abs}|${showDocs}|${coverageReport ?? ''}`;
     const snap = await scan(abs, { showDocs, coverageReport, onProgress: (pr) => send({ ...pr, root: abs }) });
     cache.set(key, snap);
+    allowedFiles.delete(abs);
     // Background per-function age via git blame, streamed as layer updates after the scan returns.
     if (snap.git?.available) {
       const acc: Record<string, number> = {};
@@ -56,6 +59,28 @@ export async function startServer(opts: ServerOptions = {}) {
     if (!p) return reply.code(400).send({ error: 'path required' });
     if (!existsSync(p)) return reply.code(404).send({ error: `Path not found: ${p}` });
     return doScan(p, req.query.showDocs === 'true', req.query.coverageReport);
+  });
+  // Code peek: only files present in a cached snapshot of that root, never outside it.
+  const allowedFiles = new Map<string, Set<string>>();
+  const filesOf = (abs: string) => {
+    let s = allowedFiles.get(abs);
+    if (s) return s;
+    s = new Set();
+    for (const [k, snap] of cache) {
+      if (!k.startsWith(abs + '|')) continue;
+      const walk = (n: Snapshot['root']) => { if (n.kind === 'file') s!.add(n.path); else n.children?.forEach(walk); };
+      walk(snap.root);
+    }
+    if (s.size) allowedFiles.set(abs, s);
+    return s;
+  };
+  app.get<{ Querystring: { root?: string; path?: string } }>('/api/file', async (req, reply) => {
+    const { root, path: rel } = req.query;
+    if (!root || !rel) return reply.code(400).send({ error: 'root and path required' });
+    const abs = safeFilePath(root, rel, filesOf(path.resolve(root)));
+    if (!abs) return reply.code(403).send({ error: 'forbidden' });
+    const text = await readFile(abs, 'utf8');
+    return reply.type('text/plain; charset=utf-8').send(text);
   });
   app.get<{ Querystring: { path?: string } }>('/api/layers/age', async (req) => blaming.get(path.resolve(req.query.path ?? '')) ?? {});
   // Progress stream (M1 stub: broadcasts stage events of any running scan).

@@ -18,6 +18,8 @@ interface Props {
   hits: Map<string, HitCounts>;
   edges: Edge[];
   edgeMode: 'imports' | 'cochange';
+  selectedId: string | null;
+  onSelect: (n: TreeNode | null) => void;
 }
 const FADE_MS = 400;
 
@@ -68,7 +70,10 @@ function bundle(pts: [number, number][], beta: number, steps = 6): [number, numb
   return out;
 }
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect }: Props) {
+  const selRef = useRef(selectedId); selRef.current = selectedId;
+  const selectCb = useRef(onSelect); selectCb.current = onSelect;
+  useEffect(() => { kick.current(); }, [selectedId]);
   const edgeRef = useRef({ edges, edgeMode, v: 0 });
   if (edgeRef.current.edges !== edges || edgeRef.current.edgeMode !== edgeMode) edgeRef.current = { edges, edgeMode, v: edgeRef.current.v + 1 };
   const pinRef = useRef({ pins, hits }); pinRef.current = { pins, hits };
@@ -157,6 +162,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       app.stage.addChild(eg, pg);
       let hoverNode: RNode | null = null;
       let edgeBuilt = { v: -1, k: 0, x: 0, y: 0, hover: null as RNode | null };
+      const litNode = () => hoverNode ?? (selRef.current != null ? byId.get(selRef.current) ?? null : null);
       let camChangedAt = 0;
       let introWas = true;
       let flows: { pts: [number, number][]; cum: number[]; len: number; col: number }[] = [];
@@ -171,7 +177,8 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       };
       const buildEdges = () => {
         const { edges, edgeMode, v } = edgeRef.current;
-        edgeBuilt = { v, k: cam.k, x: cam.x, y: cam.y, hover: hoverNode };
+        const lit0 = litNode();
+        edgeBuilt = { v, k: cam.k, x: cam.x, y: cam.y, hover: lit0 };
         eg.clear(); flows = [];
         if (!edges.length) return;
         const agg = new Map<string, { a: RNode; b: RNode; w: number }>();
@@ -185,7 +192,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           if (cur) cur.w += e.w; else agg.set(k, { a, b, w: e.w });
         }
         const all = [...agg.values()].sort((x, y) => y.w - x.w);
-        const h = hoverNode?.data.id;
+        const h = lit0?.data.id;
         const touches = (n: RNode) => h != null && (isAncOrSelf(h, n.data.id) || isAncOrSelf(n.data.id, h));
         const lit = h != null ? all.filter((e) => touches(e.a) || touches(e.b)).slice(0, 400) : [];
         const litSet = new Set(lit);
@@ -262,7 +269,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         if (!intro) {
           const camMoved = edgeBuilt.k !== cam.k || edgeBuilt.x !== cam.x || edgeBuilt.y !== cam.y;
           if (camMoved && !camChangedAt) camChangedAt = now;
-          if (edgeBuilt.v !== edgeRef.current.v || edgeBuilt.hover !== hoverNode || (camMoved && !anim && now - camChangedAt > 120)) { buildEdges(); camChangedAt = 0; }
+          if (edgeBuilt.v !== edgeRef.current.v || edgeBuilt.hover !== litNode() || (camMoved && !anim && now - camChangedAt > 120)) { buildEdges(); camChangedAt = 0; }
           drawParticles(now);
         }
         if (introWas && !intro) { introWas = false; dirty = true; } // final frame after the intro: draw labels/pins
@@ -350,6 +357,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           return covered;
         };
         visit(laid);
+        // persistent selection highlight
+        const sn = selRef.current != null ? byId.get(selRef.current) : undefined;
+        if (sn && !intro) {
+          const sx = (sn.x0 - cam.x) * cam.k, sy = (sn.y0 - cam.y) * cam.k, sw = (sn.x1 - sn.x0) * cam.k, sh = (sn.y1 - sn.y0) * cam.k;
+          g.rect(sx - 2, sy - 2, sw + 4, sh + 4).stroke({ width: 4, color: 0x22d3ee, alpha: 0.25 });
+          g.rect(sx + 0.5, sy + 0.5, Math.max(1, sw - 1), Math.max(1, sh - 1)).stroke({ width: 1.5, color: 0xa5f3fc, alpha: 0.95 });
+        }
         // labels: larger tiles first; skip any label that would collide with one already placed
         cands.sort((a, b) => b.area - a.area);
         const placed: [number, number, number, number][] = [];
@@ -386,6 +400,19 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         }
         return path;
       };
+      // deepest node that is actually drawn (respect semantic zoom)
+      const pickAt = (sx: number, sy: number): RNode => {
+        const w = toWorld(sx, sy);
+        const path = hit(w.x, w.y);
+        let pick = path[0]!;
+        for (const n of path) {
+          const pw = (n.x1 - n.x0) * cam.k, ph = (n.y1 - n.y0) * cam.k;
+          if (pw < MIN_PX || ph < MIN_PX) break;
+          pick = n;
+          if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PX * 0.6)) break;
+        }
+        return pick;
+      };
       const canvas = app.canvas;
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
@@ -408,16 +435,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           const r = canvas.getBoundingClientRect();
           const sx = e.clientX - r.left, sy = e.clientY - r.top;
           if (sx < 0 || sy < 0 || sx > r.width || sy > r.height || e.target !== canvas) { hoverNode = null; hoverCb.current(null); return; }
-          const w = toWorld(sx, sy);
-          // deepest node that is actually drawn (respect semantic zoom)
-          const path = hit(w.x, w.y);
-          let pick = path[0]!;
-          for (const n of path) {
-            const pw = (n.x1 - n.x0) * cam.k, ph = (n.y1 - n.y0) * cam.k;
-            if (pw < MIN_PX || ph < MIN_PX) break;
-            pick = n;
-            if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PX * 0.6)) break;
-          }
+          const pick = pickAt(sx, sy);
           hoverNode = pick === laid ? null : pick;
           hoverCb.current({ node: pick.data, x: e.clientX, y: e.clientY });
           return;
@@ -434,6 +452,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         const wasClick = !drag.moved;
         drag = null;
         if (!wasClick) return;
+        // single click selects (inspector); double-click dives
+        const r = canvas.getBoundingClientRect();
+        const pick = pickAt(e.clientX - r.left, e.clientY - r.top);
+        selectCb.current(pick === laid ? null : pick.data);
+        dirty = true;
+      };
+      const onDbl = (e: MouseEvent) => {
         const r = canvas.getBoundingClientRect();
         const w = toWorld(e.clientX - r.left, e.clientY - r.top);
         const path = hit(w.x, w.y);
@@ -443,13 +468,19 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       };
       const up = () => { if (focus.parent) flyTo(focus.parent); };
       const onContext = (e: MouseEvent) => { e.preventDefault(); up(); };
-      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' || e.key === 'Backspace') { if ((e.target as HTMLElement)?.tagName !== 'INPUT') up(); } };
+      const onKey = (e: KeyboardEvent) => {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.defaultPrevented) return;
+        if (e.key === 'Escape') { if (selRef.current != null) selectCb.current(null); else up(); }
+        else if (e.key === 'Backspace') up();
+      };
       const onResize = () => { dirty = true; };
       canvas.addEventListener('wheel', onWheel, { passive: false });
       canvas.addEventListener('pointerdown', onDown);
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       canvas.addEventListener('contextmenu', onContext);
+      canvas.addEventListener('dblclick', onDbl);
       window.addEventListener('keydown', onKey);
       window.addEventListener('resize', onResize);
       cleanup = () => {

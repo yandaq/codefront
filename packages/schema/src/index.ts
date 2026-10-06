@@ -107,11 +107,15 @@ export type Coupling = z.infer<typeof CouplingSchema>;
 export const SnapshotSchema = z.object({
   version: z.literal(1),
   createdAt: z.string(),
-  source: z.object({ type: z.literal('local'), path: z.string() }),
+  source: z.object({ type: z.literal('local'), path: z.string(),
+    /** Web URL of the hosting repo (GitHub/GitLab) for remote scans (M6); when set, "open" links go to the host. */
+    webUrl: z.string().optional(), ref: z.string().optional() }),
   stats: z.object({ files: z.number(), sloc: z.number(), parsedFiles: z.number(), durationMs: z.number() }),
   root: TreeNodeSchema,
   /** Git history; `available: false` for non-git directories. `commits` are epoch seconds, ascending. */
-  git: z.object({ available: z.boolean(), commits: z.array(z.number()), head: z.string().optional() }).optional(),
+  git: z.object({ available: z.boolean(), commits: z.array(z.number()), head: z.string().optional(),
+    /** Author name table and per-commit author index (parallel to `commits`). */
+    authors: z.array(z.string()).optional(), commitAuthors: z.array(z.number().int()).optional() }).optional(),
   coverage: CoverageSchema.optional(),
   hits: z.array(HitSchema).optional(),
   coupling: CouplingSchema.optional(),
@@ -141,3 +145,36 @@ export function churnFor(g: GitMetrics | undefined, commits: number[], window: C
 
 /** Complexity used by Hotspots: cognitive complexity (max over functions for aggregate nodes). */
 export function complexityOf(n: TreeNode): number { return n.cx ?? 0; }
+
+export interface Contributor { name: string; commits: number; lines: number; last: number }
+/** Aggregate a node's commits by author, most commits first. */
+export function contributors(g: GitMetrics | undefined, git: { commits: number[]; authors?: string[]; commitAuthors?: number[] } | undefined, top = 3): Contributor[] {
+  if (!g || !git?.authors || !git.commitAuthors) return [];
+  const m = new Map<number, Contributor>();
+  g.c.forEach((ci, i) => {
+    const a = git.commitAuthors![ci];
+    if (a == null) return;
+    let e = m.get(a);
+    if (!e) m.set(a, (e = { name: git.authors![a] ?? '?', commits: 0, lines: 0, last: 0 }));
+    e.commits++; e.lines += g.l[i] ?? 0; e.last = Math.max(e.last, git.commits[ci] ?? 0);
+  });
+  return [...m.values()].sort((a, b) => b.commits - a.commits || b.lines - a.lines || a.name.localeCompare(b.name)).slice(0, top);
+}
+
+/** Line link on a code host. Supports GitHub and GitLab (incl. self-hosted gitlab.*); returns null otherwise. */
+export function hostLineUrl(webUrl: string, ref: string, path: string, line?: number, endLine?: number): string | null {
+  let u: URL;
+  try { u = new URL(webUrl.replace(/^git@([^:]+):/, 'https://$1/').replace(/\.git$/, '')); } catch { return null; }
+  const base = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+  const p = path.split('/').map(encodeURIComponent).join('/');
+  const r = encodeURIComponent(ref);
+  if (u.hostname === 'github.com' || u.hostname.startsWith('github.')) {
+    const frag = line ? `#L${line}${endLine && endLine !== line ? `-L${endLine}` : ''}` : '';
+    return `${base}/blob/${r}/${p}${frag}`;
+  }
+  if (u.hostname === 'gitlab.com' || u.hostname.startsWith('gitlab.')) {
+    const frag = line ? `#L${line}${endLine && endLine !== line ? `-${endLine}` : ''}` : '';
+    return `${base}/-/blob/${r}/${p}${frag}`;
+  }
+  return null;
+}

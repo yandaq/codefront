@@ -3,6 +3,11 @@ import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode } from '@grim-rep
 import { LayerDock, type PinState } from './LayerDock';
 import { hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
 import { Treemap } from './Treemap';
+import { Inspector, type PeekReq } from './Inspector';
+import { CodePeek } from './CodePeek';
+import { Palette } from './Palette';
+import { indexTree, metricRows } from './metrics';
+import { loadEditor, type Editor } from './settings';
 import { couplingEdges, couplingStats, type CouplingOptions } from './coupling';
 
 export function App() {
@@ -32,6 +37,24 @@ export function App() {
     return { llm: hs.filter((h) => h.kind === 'llm').length, sql: hs.filter((h) => h.kind === 'sql').length };
   }, [hover, snap]);
   const [focusReq, setFocusReq] = useState<{ id: string; n: number } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [peek, setPeek] = useState<PeekReq | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [editor, setEditor] = useState<Editor>(loadEditor);
+  const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
+  const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
+  const selNode = selected != null ? ix?.byId.get(selected) ?? null : null;
+  const select = (n: TreeNode | null) => { setSelected(n ? n.id : null); if (!n) setPeek(null); };
+  const selectAndFly = (id: string) => { if (!ix?.byId.has(id)) return; setSelected(id); setFocusReq({ id, n: Date.now() }); };
+  useEffect(() => { setSelected(null); setPeek(null); }, [snap]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); }
+      else if (e.key === 'Escape' && peek) { e.preventDefault(); setPeek(null); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [peek]);
 
   const run = async (p: string) => {
     if (!p) return;
@@ -72,7 +95,7 @@ export function App() {
 
   return (
     <div className="relative h-full w-full font-sans">
-      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} />}
+      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} />}
       {snap && <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ age: ageProgress }}
         cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals}
         coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />}
@@ -91,6 +114,9 @@ export function App() {
           )}
         </div>
       )}
+      {snap && ix && rows && selNode && <Inspector snap={snap} node={selNode} ix={ix} rows={rows} onSelect={selectAndFly} onPeek={setPeek} onClose={() => select(null)} editor={editor} setEditor={setEditor} />}
+      {snap && peek && <CodePeek snap={snap} req={peek} editor={editor} onClose={() => setPeek(null)} />}
+      {snap && ix && palette && <Palette all={ix.all} onClose={() => setPalette(false)} onPick={(n) => { setPalette(false); selectAndFly(n.id); }} />}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 p-3">
         <form className="glass pointer-events-auto flex items-center gap-3 rounded-xl px-3 py-2" onSubmit={(e) => { e.preventDefault(); run(path); }}>
           <span className="font-mono text-sm font-semibold tracking-widest text-cyan-300">GRIM<span className="text-slate-500">·</span>REPO</span>
@@ -116,7 +142,7 @@ export function App() {
       {!snap && !loading && (
         <div className="flex h-full items-center justify-center text-slate-500"><p className="font-mono text-sm">Enter a local path to scan.</p></div>
       )}
-      <div className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] text-slate-600">scroll to zoom · drag to pan · click to dive · right-click / Esc to go up</div>
+      <div className="pointer-events-none absolute bottom-3 left-3 font-mono text-[10px] text-slate-600">scroll to zoom · drag to pan · click to inspect · double-click to dive · right-click / Esc to go up · ⌘K search</div>
     </div>
   );
 }

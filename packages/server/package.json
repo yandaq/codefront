@@ -1,6 +1,28 @@
-{ "name": "@grim-repo/server", "version": "0.1.0", "type": "module",
-  "main": "dist/index.js", "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "scripts": { "build": "tsc -p .", "dev": "tsc -p . && node dist/dev.js" },
-  "dependencies": { "@grim-repo/core": "workspace:*", "@grim-repo/schema": "workspace:*", "@grim-repo/web": "workspace:*",
-    "fastify": "^5.1.0", "@fastify/static": "^8.0.0", "@fastify/websocket": "^11.0.0" } }
+{
+  "name": "@grim-repo/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsc -p . && node dist/dev.js", "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@grim-repo/core": "workspace:*",
+    "@grim-repo/schema": "workspace:*",
+    "@grim-repo/web": "workspace:*",
+    "fastify": "^5.1.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}

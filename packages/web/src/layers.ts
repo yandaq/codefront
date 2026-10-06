@@ -41,7 +41,7 @@ function hex(css: string): number {
 }
 
 /** Percentile rank function over a list of values (ties share the lower rank). */
-function percentiles(values: number[]): (v: number) => number {
+export function percentiles(values: number[]): (v: number) => number {
   const s = [...values].sort((a, b) => a - b);
   return (v) => {
     if (s.length <= 1) return v > 0 ? 1 : 0;

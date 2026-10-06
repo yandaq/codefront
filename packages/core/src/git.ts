@@ -9,6 +9,9 @@ export interface GitHistory {
   head?: string;
   /** Commit timestamps (epoch s), ascending. */
   commits: number[];
+  /** Distinct author names; `commitAuthors[i]` indexes this for commit i. */
+  authors: string[];
+  commitAuthors: number[];
   files: Map<string, GitMetrics>;
 }
 
@@ -31,17 +34,17 @@ export function renameTarget(p: string): string {
 
 /** Ingest `git log --numstat` for the scan root (paths relative to it). Non-git dirs return available:false. */
 export async function readHistory(root: string): Promise<GitHistory> {
-  if (!(await isGitRepo(root))) return { available: false, commits: [], files: new Map() };
+  if (!(await isGitRepo(root))) return { available: false, commits: [], authors: [], commitAuthors: [], files: new Map() };
   let out: string;
-  try { out = await git(root, ['log', '--no-merges', '--numstat', '--relative', '--format=@@%H %ct', 'HEAD', '--', '.']); }
-  catch { return { available: true, commits: [], files: new Map() }; } // e.g. no commits yet
-  const raw: { ts: number; files: [string, number][] }[] = [];
+  try { out = await git(root, ['log', '--no-merges', '--numstat', '--relative', '--format=@@%H %ct %aN', 'HEAD', '--', '.']); }
+  catch { return { available: true, commits: [], authors: [], commitAuthors: [], files: new Map() }; } // e.g. no commits yet
+  const raw: { ts: number; author: string; files: [string, number][] }[] = [];
   let head: string | undefined;
   for (const line of out.split('\n')) {
     if (line.startsWith('@@')) {
-      const [h, ts] = line.slice(2).split(' ');
+      const [h, ts, ...au] = line.slice(2).split(' ');
       head ??= h;
-      raw.push({ ts: Number(ts), files: [] });
+      raw.push({ ts: Number(ts), author: au.join(' '), files: [] });
     } else if (line && raw.length) {
       const [a, d, ...rest] = line.split('\t');
       const p = renameTarget(rest.join('\t'));
@@ -57,7 +60,9 @@ export async function readHistory(root: string): Promise<GitHistory> {
       m.c.push(i); m.l.push(l); m.last = Math.max(m.last, c.ts);
     }
   });
-  return { available: true, head, commits: raw.map((c) => c.ts), files };
+  const aix = new Map<string, number>();
+  const commitAuthors = raw.map((c) => { let i = aix.get(c.author); if (i == null) aix.set(c.author, (i = aix.size)); return i; });
+  return { available: true, head, commits: raw.map((c) => c.ts), authors: [...aix.keys()], commitAuthors, files };
 }
 
 function merge(a: GitMetrics, b: GitMetrics): GitMetrics {
