@@ -32,7 +32,8 @@ const INTRO_MS = 1400;
 const DEPTH_STAGGER = 140;
 const MIN_PX = 2;
 const LABEL_H = 16;
-const DETAIL_PX = 90; // a file must be this big on screen before its classes/functions appear
+const DETAIL_PX = 60; // a file must be this wide on screen before its classes/functions appear
+const DETAIL_PY = 36; // ...and this tall
 
 const LANG_COLOURS: Record<string, number> = { typescript: 0x3b82f6, tsx: 0x0ea5e9, javascript: 0xeab308, python: 0x22c55e };
 const KIND_COLOURS: Record<string, number> = { class: 0x8b5cf6, function: 0x22d3ee, 'module-scope': 0x334155, 'small-group': 0x475569 };
@@ -358,6 +359,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             x0 += (w * (1 - s)) / 2; y0 += (h * (1 - s)) / 2; w *= s; h *= s; alpha = s;
           }
           const d = n.data;
+          if (d.kind !== 'file' && d.kind !== 'folder') fnTiles++;
           const def = colourFor(n);
           const { cur, prev } = paint.current;
           const cc = cur.colour(d) ?? def;
@@ -401,7 +403,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
           const covered = { llm: 0, sql: 0 };
           // semantic zoom: hide inner-file structure until the file is big on screen
-          if (n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PX * 0.6))) {
+          if (n.children && !(d.kind === 'file' && (w < DETAIL_PX || h < DETAIL_PY))) {
             for (const c of n.children) { const r = visit(c); covered.llm += r.llm; covered.sql += r.sql; }
           }
           const tot = subHits.get(n)!;
@@ -413,7 +415,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           }
           return covered;
         };
+        let fnTiles = 0;
         visit(laid);
+        if (el.dataset.fnTiles !== String(fnTiles)) el.dataset.fnTiles = String(fnTiles); // test hook: inner-file tiles drawn
         if (tweening) for (const [a, b, c, d2] of diff!.removed) {
           const x0 = (a - cam.x) * cam.k, y0 = (b - cam.y) * cam.k, w = (c - a) * cam.k, h = (d2 - b) * cam.k;
           if (w < MIN_PX || h < MIN_PX) continue;
@@ -471,7 +475,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           const pw = (n.x1 - n.x0) * cam.k, ph = (n.y1 - n.y0) * cam.k;
           if (pw < MIN_PX || ph < MIN_PX) break;
           pick = n;
-          if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PX * 0.6)) break;
+          if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PY)) break;
         }
         return pick;
       };

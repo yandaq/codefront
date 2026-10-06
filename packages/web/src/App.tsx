@@ -4,6 +4,7 @@ import { StatusBar, stageLoading } from './StatusBar';
 import { LayerDock, type PinState } from './LayerDock';
 import { hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
 import { Treemap } from './Treemap';
+import { mergeWsSnapshot } from './snapshot';
 import { Inspector, type PeekReq } from './Inspector';
 import { CodePeek } from './CodePeek';
 import { Palette } from './Palette';
@@ -130,8 +131,8 @@ export function App() {
       const m = JSON.parse(ev.data) as ProgressMessage;
       if ('type' in m && m.type === 'snapshot') {
         if (m.root !== target.current) return;
-        if (m.partial && !loadingRef.current) return;
-        setSnap((s) => (m.partial && s && s.source.path === m.snapshot.source.path && !s.stats.cacheMisses && s.stats.parsedFiles > 0 ? s : m.snapshot));
+        const loading = loadingRef.current;
+        setSnap((s) => mergeWsSnapshot(s, m.snapshot, !!m.partial, loading));
         return;
       }
       if (!('type' in m) || m.type !== 'layer') {

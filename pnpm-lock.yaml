@@ -60,6 +60,9 @@ importers:
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
+      playwright-core:
+        specifier: 1.62.0
+        version: 1.62.0
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.5)(lightningcss@1.32.0)
@@ -1651,6 +1654,11 @@ packages:
 
   pixi.js@8.22.0:
     resolution: {integrity: sha512-QbTANHMZ751MIjLiLSUSM8a7LNMWwMIf0KbRCqlW+SPS9hNLfSVS+cl1O2SEp9g1K/wyLzj/OJHv+1TUfiPr/w==}
+
+  playwright-core@1.62.0:
+    resolution: {integrity: sha512-nsNRyq0r2zsG8AcRHWknc9QRA5XCueC7gWMrs+Gx2tlZn9hcl8zudfh00lhJPY1DE7NmZ6bDsT9g2yey8mXljA==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   postcss-import@15.1.0:
     resolution: {integrity: sha512-hpr+J05B2FVYUAXHeK1YyI267J/dDDhMU6B6civm8hSY1jYJnBXxzKDKDswzJmtLHryrjhnDjqqp/49t8FALew==}
@@ -3457,6 +3465,8 @@ snapshots:
       ismobilejs: 1.1.1
       parse-svg-path: 0.2.0
       tiny-lru: 11.4.7
+
+  playwright-core@1.62.0: {}
 
   postcss-import@15.1.0(postcss@8.5.29):
     dependencies:

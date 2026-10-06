@@ -36,6 +36,7 @@
     "@grim-repo/server": "workspace:*",
     "@grim-repo/web": "workspace:*",
     "esbuild": "^0.24.0",
+    "playwright-core": "1.62.0",
     "vitest": "^2.1.0"
   }
 }

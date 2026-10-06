@@ -1,0 +1,44 @@
+import { describe, it, expect } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+const bin = path.resolve(__dirname, '../dist/index.js');
+// The server and playwright-core both need Node 20+ (pnpm may run vitest on an older Node via Volta).
+const node20 = Number(process.versions.node.split('.')[0]) >= 20;
+const { chromium } = node20 ? await import('playwright-core') : ({} as typeof import('playwright-core'));
+const hasBrowser = node20 && (() => { try { return existsSync(chromium.executablePath()); } catch { return false; } })();
+
+// Regression: function/class sub-squares must actually be drawn inside a file once zoomed in.
+describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist/web/index.html')) || !hasBrowser)('treemap UI (headless Chromium)', () => {
+  it('draws function tiles inside a zoomed file', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    mkdirSync(path.join(dir, 'src'));
+    const fns = Array.from({ length: 4 }, (_, i) => `export function f${i}(x: number) {\n${'  x = x + 1;\n'.repeat(20)}  return x;\n}\n`).join('\n');
+    writeFileSync(path.join(dir, 'src', 'big.ts'), `export class K {\n  m() { return 1; }\n}\n${fns}`);
+    writeFileSync(path.join(dir, 'small.ts'), 'export const y = 1;\n');
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const browser = await chromium.launch();
+    try {
+      const url = await new Promise<string>((res, rej) => {
+        let out = '';
+        srv.stdout.on('data', (d) => { out += d; const m = /running at (\S+)/.exec(out); if (m) res(m[1]!); });
+        srv.on('exit', () => rej(new Error(`server exited: ${out}`)));
+      });
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(url);
+      const tiles = () => page.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0));
+      await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
+      // dive root -> src -> big.ts (the file dominates the canvas, so its centre stays under the cursor)
+      const box = (await page.locator('canvas').boundingBox())!;
+      for (let i = 0; i < 2; i++) { await page.mouse.dblclick(box.x + box.width * 0.4, box.y + box.height / 2); await page.waitForTimeout(1000); }
+      await expect.poll(() => page.evaluate(() => document.body.innerText.includes('big.ts'))).toBe(true);
+      expect(await tiles()).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+      srv.kill();
+    }
+  }, 60000);
+});
