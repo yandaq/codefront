@@ -22,6 +22,10 @@ interface Props {
   onSelect: (n: TreeNode | null) => void;
 }
 const FADE_MS = 400;
+const DIFF_MS = 600; // rescan: layout tween
+const PULSE_MS = 1500; // rescan: changed-file pulse
+type Rect = [number, number, number, number];
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 const WORLD_W = 1600;
 const INTRO_MS = 1400;
@@ -89,7 +93,10 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
     kick.current();
   }, [painter]);
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<{ focusId: (id: string) => void } | null>(null);
+  const api = useRef<{ focusId: (id: string) => void; load: (s: Snapshot) => void } | null>(null);
+  const snapRef = useRef(snapshot);
+  // a new snapshot of the same repo (rescan / watch / progressive render) animates in place; a new repo replays the intro
+  useEffect(() => { if (snapRef.current === snapshot) return; snapRef.current = snapshot; api.current?.load(snapshot); }, [snapshot]);
 
   useEffect(() => {
     const el = host.current!;
@@ -107,17 +114,19 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
       // ---- layout (world space) ----
       const worldH = WORLD_W * (el.clientHeight / Math.max(1, el.clientWidth));
-      const root = hierarchy(snapshot.root, (d) => d.children).sum((d) => (d.children?.length ? 0 : d.sloc)).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-      const laid = treemap<TreeNode>()
+      const layout = (s: Snapshot): RNode => treemap<TreeNode>()
         .tile(treemapSquarify.ratio(1.2))
         .size([WORLD_W, worldH])
         .paddingTop((d) => (d.data.kind === 'folder' ? Math.max(1.5, 18 * Math.pow(0.62, d.depth)) : Math.max(0.4, 6 * Math.pow(0.6, d.depth))))
         .paddingRight((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
         .paddingBottom((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
         .paddingLeft((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
-        .paddingInner((d) => Math.max(0.3, 2 * Math.pow(0.62, d.depth)))(root);
-      const byId = new Map<string, RNode>();
-      laid.each((n) => byId.set(n.data.id, n));
+        .paddingInner((d) => Math.max(0.3, 2 * Math.pow(0.62, d.depth)))(
+          hierarchy(s.root, (d) => d.children).sum((d) => (d.children?.length ? 0 : d.sloc)).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)));
+      let laid = layout(snapRef.current);
+      let byId = new Map<string, RNode>();
+      const index = () => { byId = new Map(); laid.each((n) => byId.set(n.data.id, n)); };
+      index();
       // subtree hit totals for pin aggregation
       const subHits = new Map<RNode, HitCounts>();
       const sumHits = () => {
@@ -131,7 +140,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       };
       sumHits();
       let hitsSeen = pinRef.current.hits;
-      const maxDepth = laid.height;
+      let maxDepth = laid.height;
 
       // ---- camera ----
       const fit = (n: RNode): Cam => {
@@ -142,8 +151,11 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       let cam: Cam = fit(laid);
       let anim: { from: Cam; to: Cam; t0: number; dur: number } | null = null;
       let focus: RNode = laid;
-      const t0 = performance.now();
+      let t0 = performance.now();
       let dirty = true;
+      let diff: { t0: number; prev: Map<string, Rect>; removed: Rect[] } | null = null;
+      let pulse: { t0: number; changed: Set<string> } | null = null;
+      let loadedRoot = snapRef.current.source.path;
 
       const flyTo = (n: RNode) => {
         focus = n;
@@ -151,7 +163,29 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         onFocusChange(n.ancestors().reverse().map((a) => ({ id: a.data.id, name: a.data.name })));
       };
       onFocusChange([{ id: laid.data.id, name: laid.data.name }]);
-      api.current = { focusId: (id) => { const n = byId.get(id); if (n) flyTo(n); } };
+      const load = (s: Snapshot) => {
+        const old = laid;
+        laid = layout(s); index(); subHits.clear(); sumHits(); maxDepth = laid.height;
+        edgeBuilt.v = -1; hoverNode = null; dirty = true;
+        if (s.source.path !== loadedRoot) {
+          loadedRoot = s.source.path; diff = null; pulse = null;
+          cam = fit(laid); anim = null; focus = laid; t0 = performance.now(); introWas = true;
+          onFocusChange([{ id: laid.data.id, name: laid.data.name }]);
+          return;
+        }
+        const prev = new Map<string, Rect>(), prevHash = new Map<string, string | undefined>();
+        old.each((n) => { prev.set(n.data.id, [n.x0, n.y0, n.x1, n.y1]); if (n.data.kind === 'file') prevHash.set(n.data.id, n.data.hash); });
+        const changed = new Set<string>();
+        laid.each((n) => { if (n.data.kind === 'file' && prevHash.has(n.data.id) && prevHash.get(n.data.id) !== n.data.hash) changed.add(n.data.id); });
+        const removed: Rect[] = [];
+        old.each((n) => { if (!byId.has(n.data.id) && (n.data.kind === 'file' || n.data.kind === 'folder') && n.parent && byId.has(n.parent.data.id)) removed.push([n.x0, n.y0, n.x1, n.y1]); });
+        const now = performance.now();
+        diff = { t0: now, prev, removed };
+        // progressive render delivers several snapshots in a row: keep an active pulse going
+        if (changed.size) { if (pulse && now - pulse.t0 < PULSE_MS) pulse.changed.forEach((id) => changed.add(id)); pulse = { t0: now, changed }; }
+        focus = byId.get(focus.data.id) ?? laid;
+      };
+      api.current = { focusId: (id) => { const n = byId.get(id); if (n) flyTo(n); }, load };
 
       // ---- rendering ----
       const g = new Graphics();
@@ -273,7 +307,23 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           drawParticles(now);
         }
         if (introWas && !intro) { introWas = false; dirty = true; } // final frame after the intro: draw labels/pins
-        if (!dirty && !intro && !fading) return;
+        const dT = diff ? Math.min(1, (now - diff.t0) / DIFF_MS) : 1;
+        const tweening = !!diff && dT < 1;
+        const pulseT = pulse ? (now - pulse.t0) / PULSE_MS : 1;
+        if (diff && !tweening) { diff = null; dirty = true; }
+        if (pulse && pulseT >= 1) { pulse = null; dirty = true; }
+        const animState = tweening ? 'diff' : pulse ? 'pulse' : '';
+        if (el.dataset.anim !== animState) el.dataset.anim = animState; // test/debug hook
+        if (!dirty && !intro && !fading && !diff && !pulse) return;
+        const eD = ease(dT);
+        /** World rect, tweened from the previous layout during a rescan (new tiles grow from their centre). */
+        const wr = (n: RNode): Rect => {
+          if (!tweening) return [n.x0, n.y0, n.x1, n.y1];
+          const p = diff!.prev.get(n.data.id);
+          if (p) return [lerp(p[0], n.x0, eD), lerp(p[1], n.y0, eD), lerp(p[2], n.x1, eD), lerp(p[3], n.y1, eD)];
+          const cx = (n.x0 + n.x1) / 2, cy = (n.y0 + n.y1) / 2, hw = ((n.x1 - n.x0) / 2) * eD, hh = ((n.y1 - n.y0) / 2) * eD;
+          return [cx - hw, cy - hh, cx + hw, cy + hh];
+        };
         dirty = false;
 
         g.clear();
@@ -294,12 +344,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         };
         /** Returns hits accounted for (pinned here/below, or off-screen); unaccounted hits bubble up to the parent's pin. */
         const visit = (n: RNode): HitCounts => {
-          let x0 = (n.x0 - cam.x) * cam.k, y0 = (n.y0 - cam.y) * cam.k;
-          let w = (n.x1 - n.x0) * cam.k, h = (n.y1 - n.y0) * cam.k;
+          const [rx0, ry0, rx1, ry1] = wr(n);
+          let x0 = (rx0 - cam.x) * cam.k, y0 = (ry0 - cam.y) * cam.k;
+          let w = (rx1 - rx0) * cam.k, h = (ry1 - ry0) * cam.k;
           if (x0 > W || y0 > H || x0 + w < 0 || y0 + h < 0) return subHits.get(n)!;
           if (w < MIN_PX || h < MIN_PX) return ZERO;
           // grow-in: each depth starts later and scales up from its centre
-          let alpha = 1;
+          let alpha = tweening && !diff!.prev.has(n.data.id) ? eD : 1;
           if (intro) {
             const p = Math.max(0, Math.min(1, (now - t0 - n.depth * DEPTH_STAGGER) / (INTRO_MS * 0.6)));
             if (p <= 0) return ZERO;
@@ -335,6 +386,12 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             g.rect(x0 - 1.5, y0 - 1.5, w + 3, h + 3).stroke({ width: 3, color: 0xfde68a, alpha: 0.35 * alpha * (fading ? fadeT : 1) });
             g.rect(x0 + 0.5, y0 + 0.5, w - 1, h - 1).stroke({ width: 1.5, color: 0xfffbeb, alpha: 0.8 * alpha * (fading ? fadeT : 1) });
           }
+          if (pulse && pulseT < 1 && d.kind === 'file' && pulse.changed.has(d.id)) {
+            // changed on rescan: a few bright pulses that decay
+            const a = Math.pow(Math.sin(pulseT * Math.PI * 3), 2) * (1 - pulseT);
+            g.rect(x0, y0, w, h).fill({ color: 0xa5f3fc, alpha: 0.28 * a });
+            g.rect(x0 - 1, y0 - 1, w + 2, h + 2).stroke({ width: 2, color: 0x22d3ee, alpha: 0.9 * a });
+          }
           // labels
           if (!intro && w > 44 && h > 16 && cands.length < 3000) {
             const lx = Math.max(0, x0), ly = Math.max(0, y0);
@@ -357,6 +414,11 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           return covered;
         };
         visit(laid);
+        if (tweening) for (const [a, b, c, d2] of diff!.removed) {
+          const x0 = (a - cam.x) * cam.k, y0 = (b - cam.y) * cam.k, w = (c - a) * cam.k, h = (d2 - b) * cam.k;
+          if (w < MIN_PX || h < MIN_PX) continue;
+          g.rect(x0, y0, w, h).fill({ color: 0x64748b, alpha: 0.4 * (1 - eD) }).stroke({ width: 1, color: 0xf87171, alpha: 0.6 * (1 - eD) });
+        }
         // persistent selection highlight
         const sn = selRef.current != null ? byId.get(selRef.current) : undefined;
         if (sn && !intro) {
@@ -499,7 +561,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       labelsEl.remove();
       try { app.destroy(true, { children: true }); } catch { /* not initialised yet */ }
     };
-  }, [snapshot]);
+  }, []);
 
   useEffect(() => { if (focusRequest) api.current?.focusId(focusRequest.id); }, [focusRequest]);
 

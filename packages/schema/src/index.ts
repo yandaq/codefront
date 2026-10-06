@@ -20,6 +20,8 @@ export interface TreeNode {
   cxMean?: number;
   /** Fraction (0..1) of instrumented lines covered; undefined = no coverage data. */
   cov?: number;
+  /** Files: content id (git blob SHA, or `c:<sha1>` for dirty/untracked) — used for rescan diffs. */
+  hash?: string;
   children?: TreeNode[];
 }
 
@@ -45,6 +47,7 @@ export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     cx: z.number().optional(),
     cxMean: z.number().optional(),
     cov: z.number().optional(),
+    hash: z.string().optional(),
     children: z.array(TreeNodeSchema).optional(),
   }),
 );
@@ -107,10 +110,16 @@ export type Coupling = z.infer<typeof CouplingSchema>;
 export const SnapshotSchema = z.object({
   version: z.literal(1),
   createdAt: z.string(),
-  source: z.object({ type: z.literal('local'), path: z.string(),
+  source: z.object({ type: z.enum(['local', 'remote']), path: z.string(),
+    /** Clone URL for remote scans. */
+    url: z.string().optional(),
     /** Web URL of the hosting repo (GitHub/GitLab) for remote scans (M6); when set, "open" links go to the host. */
     webUrl: z.string().optional(), ref: z.string().optional() }),
-  stats: z.object({ files: z.number(), sloc: z.number(), parsedFiles: z.number(), durationMs: z.number() }),
+  stats: z.object({ files: z.number(), sloc: z.number(), parsedFiles: z.number(), durationMs: z.number(),
+    /** Per-file analysis cache hits/misses for this scan. */
+    cacheHits: z.number().optional(), cacheMisses: z.number().optional(),
+    /** Large repo: file children stripped; fetch per-file detail lazily via /api/detail. */
+    lite: z.boolean().optional() }),
   root: TreeNodeSchema,
   /** Git history; `available: false` for non-git directories. `commits` are epoch seconds, ascending. */
   git: z.object({ available: z.boolean(), commits: z.array(z.number()), head: z.string().optional(),
@@ -122,14 +131,22 @@ export const SnapshotSchema = z.object({
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 
-export const ScanRequestSchema = z.object({ path: z.string().min(1), showDocs: z.boolean().optional(), coverageReport: z.string().optional() });
+export const ScanRequestSchema = z.object({ path: z.string().min(1), showDocs: z.boolean().optional(), coverageReport: z.string().optional(),
+  /** Remote repos: branch to check out. */
+  ref: z.string().optional(),
+  /** Remote repos: `git fetch` + reset to origin/<branch> before scanning (rescan). */
+  fetch: z.boolean().optional() });
 export type ScanRequest = z.infer<typeof ScanRequestSchema>;
 
-export interface ScanProgress { stage: 'walk' | 'sloc' | 'parse' | 'detect' | 'coverage' | 'git' | 'blame' | 'done'; done: number; total: number; root?: string }
+export const STAGES = ['clone', 'walk', 'sloc', 'git', 'parse', 'detect', 'coverage', 'blame'] as const;
+export type Stage = (typeof STAGES)[number];
+export interface ScanProgress { stage: Stage | 'done'; done: number; total: number; root?: string; message?: string }
 
 /** Layer update pushed over /api/progress. `values` maps node id -> epoch seconds of last change. */
 export interface LayerUpdate { type: 'layer'; layer: 'age'; root: string; values: Record<string, number>; done: number; total: number }
-export type ProgressMessage = (ScanProgress & { type?: 'progress' }) | LayerUpdate;
+/** A (partial or refreshed) snapshot pushed to clients: progressive render, watch-mode rescans. */
+export interface SnapshotUpdate { type: 'snapshot'; root: string; partial?: boolean; snapshot: Snapshot }
+export type ProgressMessage = (ScanProgress & { type?: 'progress' }) | LayerUpdate | SnapshotUpdate;
 
 export const CHURN_WINDOWS = { '30d': 30, '90d': 90, '1y': 365, all: Infinity } as const;
 export type ChurnWindow = keyof typeof CHURN_WINDOWS;

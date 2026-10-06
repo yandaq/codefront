@@ -19,5 +19,10 @@
   "volta": {
     "node": "22.21.1"
   },
-  "packageManager": "pnpm@10.7.0"
+  "packageManager": "pnpm@10.7.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "keytar"
+    ]
+  }
 }

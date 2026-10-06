@@ -3,7 +3,7 @@ import path from 'node:path';
 import ignoreMod, { type Ignore } from 'ignore';
 const ignore = ignoreMod as unknown as () => Ignore;
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'vendor', 'vendors', 'third_party', 'bower_components', '__pycache__', '.venv', 'venv', '.next', '.turbo', 'coverage', '.cache']);
+export const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'vendor', 'vendors', 'third_party', 'bower_components', '__pycache__', '.venv', 'venv', '.next', '.turbo', 'coverage', '.cache']);
 const LOCKFILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'Cargo.lock', 'poetry.lock', 'Pipfile.lock', 'composer.lock', 'Gemfile.lock', 'go.sum', 'bun.lockb', 'uv.lock']);
 const DOC_EXT = new Set(['.md', '.mdx', '.txt', '.rst', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.xml', '.csv', '.lock', '.env', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp']);
 const BINARY_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.pdf', '.zip', '.gz', '.tar', '.wasm', '.woff', '.woff2', '.ttf', '.otf', '.eot', '.mp3', '.mp4', '.mov', '.so', '.dylib', '.dll', '.exe', '.bin', '.class', '.jar', '.pyc', '.o', '.a']);
@@ -72,4 +72,17 @@ export async function readTextFile(abs: string): Promise<string | null> {
   const buf = await fs.readFile(abs);
   if (buf.subarray(0, 8000).includes(0)) return null; // binary
   return buf.toString('utf8');
+}
+
+/** Predicate for watchers: true if an absolute path under `root` should be ignored (skip dirs, dot dirs, root .gitignore). */
+export async function ignoreFilter(root: string): Promise<(abs: string) => boolean> {
+  const ig = ignore();
+  const gi = await readIgnore(path.join(root, '.gitignore'));
+  if (gi) ig.add(gi);
+  return (abs: string) => {
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    if (!rel || rel.startsWith('..')) return false;
+    if (rel.split('/').some((s) => SKIP_DIRS.has(s) || s.startsWith('.'))) return true;
+    return ig.ignores(rel);
+  };
 }

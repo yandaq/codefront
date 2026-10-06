@@ -1,1 +1,6 @@
-{ "extends": "../../tsconfig.base.json", "compilerOptions": { "outDir": "dist", "rootDir": "src" }, "include": ["src"] }
+{
+  "extends": "../../tsconfig.base.json",
+  // Editor/typecheck config: workspace packages resolve to their src via the "source" export condition.
+  "compilerOptions": { "customConditions": ["source"], "noEmit": true },
+  "include": ["src"]
+}

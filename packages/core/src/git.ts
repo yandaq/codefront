@@ -32,26 +32,29 @@ export function renameTarget(p: string): string {
   return plain ? plain[2]! : p;
 }
 
-/** Ingest `git log --numstat` for the scan root (paths relative to it). Non-git dirs return available:false. */
-export async function readHistory(root: string): Promise<GitHistory> {
-  if (!(await isGitRepo(root))) return { available: false, commits: [], authors: [], commitAuthors: [], files: new Map() };
-  let out: string;
-  try { out = await git(root, ['log', '--no-merges', '--numstat', '--relative', '--format=@@%H %ct %aN', 'HEAD', '--', '.']); }
-  catch { return { available: true, commits: [], authors: [], commitAuthors: [], files: new Map() }; } // e.g. no commits yet
-  const raw: { ts: number; author: string; files: [string, number][] }[] = [];
-  let head: string | undefined;
+export interface RawCommit { h: string; ts: number; author: string; files: [string, number][] }
+/** Persistable raw history for incremental refresh: `head` is the last-seen HEAD. */
+export interface RawHistory { head?: string; raw: RawCommit[] }
+
+const LOG_ARGS = ['log', '--no-merges', '--numstat', '--relative', '--format=@@%H %ct %aN'];
+
+export function parseLog(out: string): RawCommit[] {
+  const raw: RawCommit[] = [];
   for (const line of out.split('\n')) {
     if (line.startsWith('@@')) {
       const [h, ts, ...au] = line.slice(2).split(' ');
-      head ??= h;
-      raw.push({ ts: Number(ts), author: au.join(' '), files: [] });
+      raw.push({ h: h!, ts: Number(ts), author: au.join(' '), files: [] });
     } else if (line && raw.length) {
       const [a, d, ...rest] = line.split('\t');
       const p = renameTarget(rest.join('\t'));
       raw[raw.length - 1]!.files.push([p, (Number(a) || 0) + (Number(d) || 0)]); // binary files report '-'
     }
   }
-  raw.sort((x, y) => x.ts - y.ts);
+  return raw.reverse(); // git log is newest-first; keep chronological order (stable for equal timestamps)
+}
+
+export function buildHistory(raw: RawCommit[], head?: string): GitHistory {
+  raw = [...raw].sort((x, y) => x.ts - y.ts);
   const files = new Map<string, GitMetrics>();
   raw.forEach((c, i) => {
     for (const [p, l] of c.files) {
@@ -63,6 +66,48 @@ export async function readHistory(root: string): Promise<GitHistory> {
   const aix = new Map<string, number>();
   const commitAuthors = raw.map((c) => { let i = aix.get(c.author); if (i == null) aix.set(c.author, (i = aix.size)); return i; });
   return { available: true, head, commits: raw.map((c) => c.ts), authors: [...aix.keys()], commitAuthors, files };
+}
+
+/**
+ * Ingest `git log --numstat` for the scan root (paths relative to it). Non-git dirs return available:false.
+ * With `prev`, only commits since the last-seen HEAD are read (full recompute if HEAD isn't a descendant).
+ */
+export async function readHistory(root: string, prev?: RawHistory): Promise<GitHistory & { rawHistory: RawHistory; mode: 'full' | 'incremental' | 'unchanged' }> {
+  const none = { available: false, commits: [], authors: [], commitAuthors: [], files: new Map(), rawHistory: { raw: [] }, mode: 'full' as const };
+  if (!(await isGitRepo(root))) return none;
+  let head: string;
+  try { head = (await git(root, ['rev-parse', 'HEAD'])).trim(); }
+  catch { return { ...none, available: true }; } // e.g. no commits yet
+  let raw: RawCommit[], mode: 'full' | 'incremental' | 'unchanged' = 'full';
+  if (prev?.head === head) { raw = prev.raw; mode = 'unchanged'; }
+  else if (prev?.head && (await isAncestor(root, prev.head, head))) {
+    raw = [...prev.raw, ...parseLog(await git(root, [...LOG_ARGS, `${prev.head}..${head}`, '--', '.']))];
+    mode = 'incremental';
+  } else raw = parseLog(await git(root, [...LOG_ARGS, head, '--', '.']));
+  return { ...buildHistory(raw, head), rawHistory: { head, raw }, mode };
+}
+
+async function isAncestor(root: string, a: string, b: string): Promise<boolean> {
+  try { await exec('git', ['merge-base', '--is-ancestor', a, b], { cwd: root }); return true; } catch { return false; }
+}
+
+/**
+ * Content id per file: git blob SHA from `git ls-files -s` for clean tracked files;
+ * dirty/untracked files (and non-git dirs) get `c:<sha1 of content>` computed by the caller (returns undefined).
+ */
+export async function blobShas(root: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!(await isGitRepo(root))) return out;
+  try {
+    const ls = await git(root, ['ls-files', '-s', '-z']);
+    for (const rec of ls.split('\0')) {
+      const m = rec.match(/^\d+ ([0-9a-f]+) \d\t(.*)$/s);
+      if (m) out.set(m[2]!, m[1]!);
+    }
+    const dirty = await git(root, ['ls-files', '-m', '-z']);
+    for (const p of dirty.split('\0')) if (p) out.delete(p);
+  } catch { /* ignore */ }
+  return out;
 }
 
 function merge(a: GitMetrics, b: GitMetrics): GitMetrics {
@@ -135,7 +180,9 @@ export function functionAges(file: TreeNode, times: number[], out: Record<string
 }
 
 /** Background blame over all parsed files with bounded concurrency; reports batches of node ages. */
-export async function blameTree(root: string, tree: TreeNode, onBatch: (values: Record<string, number>, done: number, total: number) => void, concurrency = 4): Promise<void> {
+export interface BlameCache { get(file: TreeNode): Record<string, number> | undefined; set(file: TreeNode, v: Record<string, number>): void }
+
+export async function blameTree(root: string, tree: TreeNode, onBatch: (values: Record<string, number>, done: number, total: number) => void, concurrency = 4, cache?: BlameCache): Promise<void> {
   const files: TreeNode[] = [];
   const collect = (n: TreeNode) => { if (n.kind === 'file') { if (n.children?.length && n.git) files.push(n); } else n.children?.forEach(collect); };
   collect(tree);
@@ -149,7 +196,9 @@ export async function blameTree(root: string, tree: TreeNode, onBatch: (values: 
   const worker = async () => {
     while (next < files.length) {
       const f = files[next++]!;
-      try { functionAges(f, await blameLines(root, f.path), pending); } catch { /* untracked etc. */ }
+      const hit = cache?.get(f);
+      if (hit) Object.assign(pending, hit);
+      else try { const v = functionAges(f, await blameLines(root, f.path)); cache?.set(f, v); Object.assign(pending, v); } catch { /* untracked etc. */ }
       done++;
       flush();
     }

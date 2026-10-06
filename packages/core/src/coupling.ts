@@ -27,6 +27,10 @@ export class ImportResolver {
   private tsCache = new Map<string, TsPaths | null>();
   private pkgs = new Map<string, string>(); // package name -> dir
   private pySuffix = new Map<string, string>(); // "a/b/c" (no ext) suffix -> shortest file
+  private javaSuffix = new Map<string, string>(); // "com/x/Foo" suffix -> file
+  private dirFiles = new Map<string, string[]>(); // dir -> files (for Go/C# package/namespace -> dir)
+  private csDirSuffix = new Map<string, string>(); // "A/B" dir suffix -> dir containing .cs
+  private goMods: [string, string][] = []; // [moduleDir, modulePath]
 
   constructor(private root: string, files: string[]) {
     this.files = new Set(files);
@@ -38,6 +42,24 @@ export class ImportResolver {
       if (!existsSync(pj)) continue;
       const name = readJson(pj)?.name;
       if (typeof name === 'string') this.pkgs.set(name, d);
+    }
+    for (const f of files) {
+      const d = P.dirname(f) === '.' ? '' : P.dirname(f);
+      let l = this.dirFiles.get(d); if (!l) this.dirFiles.set(d, (l = [])); l.push(f);
+      if (f.endsWith('.java')) {
+        const segs = f.slice(0, -5).split('/');
+        for (let i = 0; i < segs.length; i++) { const k = segs.slice(i).join('/'); if (!this.javaSuffix.has(k)) this.javaSuffix.set(k, f); }
+      }
+      if (f.endsWith('.cs') && d) {
+        const segs = d.split('/');
+        for (let i = 0; i < segs.length; i++) { const k = segs.slice(i).join('/'); if (!this.csDirSuffix.has(k)) this.csDirSuffix.set(k, d); }
+      }
+    }
+    for (const d of dirs) {
+      try {
+        const m = readFileSync(path.join(root, d, 'go.mod'), 'utf8').match(/^module\s+(\S+)/m);
+        if (m) this.goMods.push([d, m[1]!]);
+      } catch { /* none */ }
     }
     for (const f of files) {
       if (!/\.pyi?$/.test(f)) continue;
@@ -106,6 +128,10 @@ export class ImportResolver {
   resolve(from: string, imp: ImportRef): string | null {
     const dir = P.dirname(from) === '.' ? '' : P.dirname(from);
     if (/\.pyi?$/.test(from)) return this.resolvePy(dir, imp);
+    if (from.endsWith('.go')) return this.resolveGo(imp.spec);
+    if (from.endsWith('.java')) return this.javaSuffix.get(imp.spec.replace(/\.\*$/, '').split('.').join('/')) ?? null;
+    if (from.endsWith('.cs')) return this.resolveCs(imp.spec);
+    if (from.endsWith('.rs')) return this.resolveRust(from, dir, imp.spec);
     const s = imp.spec;
     if (s.startsWith('.')) return this.probe(P.join(dir, s));
     if (s.startsWith('/')) return this.probe(s.slice(1));
@@ -125,6 +151,49 @@ export class ImportResolver {
     const name = s.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!;
     const pdir = this.pkgs.get(name);
     if (pdir != null) return this.pkgEntry(pdir, s.slice(name.length + 1));
+    return null;
+  }
+
+  private firstIn(dir: string, ext: string): string | null {
+    return (this.dirFiles.get(dir) ?? []).filter((f) => f.endsWith(ext) && !f.endsWith('_test.go')).sort()[0] ?? null;
+  }
+
+  /** Go: import path under a go.mod module -> first non-test file of that package dir. */
+  private resolveGo(spec: string): string | null {
+    for (const [d, mod] of this.goMods) {
+      if (spec !== mod && !spec.startsWith(mod + '/')) continue;
+      const r = this.firstIn(P.join(d, spec.slice(mod.length + 1)).replace(/^\.$/, ''), '.go');
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /** C#: namespace `A.B.C` -> a directory ending in A/B/C (or shorter suffix) containing .cs files. */
+  private resolveCs(spec: string): string | null {
+    const segs = spec.split('.');
+    for (let i = 0; i < segs.length; i++) {
+      const d = this.csDirSuffix.get(segs.slice(i).join('/'));
+      if (d) return this.firstIn(d, '.cs');
+    }
+    return null;
+  }
+
+  /** Rust: `mod x;` -> sibling x.rs / x/mod.rs; `crate::a::b::C` -> src/a/b.rs etc. (best-effort). */
+  private resolveRust(from: string, dir: string, spec: string): string | null {
+    const tryMod = (base: string) => this.file(base + '.rs') ?? this.file(P.join(base, 'mod.rs'));
+    if (spec.startsWith('mod:')) {
+      const name = spec.slice(4), stem = P.basename(from, '.rs');
+      const base = ['mod', 'lib', 'main'].includes(stem) ? dir : P.join(dir, stem);
+      return tryMod(P.join(base, name));
+    }
+    const m = spec.match(/^(crate|self|super)::(.*)$/);
+    if (!m) return null;
+    let base: string;
+    if (m[1] === 'crate') { let d = dir; while (d && P.basename(d) !== 'src') d = P.dirname(d) === '.' ? '' : P.dirname(d); base = d; }
+    else if (m[1] === 'super') base = P.dirname(dir) === '.' ? '' : P.dirname(dir);
+    else base = dir;
+    const segs = m[2]!.replace(/\{.*$/, '').split('::').filter(Boolean);
+    for (let i = segs.length; i > 0; i--) { const r = tryMod(P.join(base, ...segs.slice(0, i))); if (r) return r; }
     return null;
   }
 

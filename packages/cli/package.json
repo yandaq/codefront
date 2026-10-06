@@ -1,4 +1,41 @@
-{ "name": "grim-repo", "version": "0.1.0", "type": "module",
-  "bin": { "grim-repo": "dist/index.js" },
-  "scripts": { "build": "tsc -p ." },
-  "dependencies": { "@grim-repo/server": "workspace:*", "open": "^10.1.0" } }
+{
+  "name": "grim-repo",
+  "version": "0.1.0",
+  "description": "Local-first codebase visualisation: treemap of folders/files/functions with git, complexity, coverage, coupling and LLM/SQL layers.",
+  "type": "module",
+  "bin": {
+    "grim-repo": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p . && node build.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "chokidar": "^4.0.1",
+    "fastify": "^5.1.0",
+    "ignore": "^6.0.2",
+    "open": "^10.1.0",
+    "tree-sitter-wasms": "^0.1.12",
+    "web-tree-sitter": "0.22.6",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@grim-repo/core": "workspace:*",
+    "@grim-repo/schema": "workspace:*",
+    "@grim-repo/server": "workspace:*",
+    "@grim-repo/web": "workspace:*",
+    "esbuild": "^0.24.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,11 +1,14 @@
 import type Parser from 'web-tree-sitter';
 type N = Parser.SyntaxNode;
 
-const LOOPS = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
-const SWITCHES = new Set(['switch_statement', 'match_statement']);
+const LOOPS = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement',
+  'enhanced_for_statement', 'foreach_statement', 'for_each_statement', 'for_expression', 'while_expression', 'loop_expression']);
+const SWITCHES = new Set(['switch_statement', 'match_statement', 'expression_switch_statement', 'type_switch_statement', 'select_statement', 'switch_expression', 'match_expression']);
+const IFS = new Set(['if_statement', 'if_expression']);
 const CATCHES = new Set(['catch_clause', 'except_clause', 'except_group_clause']);
 const TERNARY = new Set(['ternary_expression', 'conditional_expression']);
-const NESTED_FN = new Set(['arrow_function', 'function_expression', 'function', 'generator_function', 'function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition', 'lambda', 'class_declaration', 'class_definition', 'class']);
+const NESTED_FN = new Set(['arrow_function', 'function_expression', 'function', 'generator_function', 'function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition', 'lambda', 'class_declaration', 'class_definition', 'class',
+  'func_literal', 'lambda_expression', 'closure_expression', 'anonymous_method_expression']);
 const BOOL_JS = new Set(['&&', '||', '??']);
 
 function boolOp(n: N): string | null {
@@ -19,7 +22,8 @@ export function cognitiveComplexity(fn: N, inners?: number[]): number {
   return children(fn, 0, inners ?? []);
 }
 
-const DECL_FN = new Set(['function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition']);
+const DECL_FN = new Set(['function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition',
+  'method_declaration', 'constructor_declaration', 'local_function_statement', 'function_item']);
 const VALUE_FN = new Set(['arrow_function', 'function_expression', 'function', 'generator_function']);
 const NAMING_PARENT = new Set(['variable_declarator', 'pair', 'public_field_definition', 'field_definition']);
 
@@ -40,9 +44,13 @@ function children(n: N, nest: number, inners: number[]): number {
 function ifChain(n: N, nest: number, inners: number[]): number {
   // n is an if_statement; caller already added its own increment
   let s = 0;
+  const alt = n.childForFieldName('alternative');
   for (const c of n.namedChildren) {
-    if (c.type === 'else_clause') {
-      const inner = c.namedChildren.length === 1 && c.namedChildren[0]!.type === 'if_statement' ? c.namedChildren[0]! : null;
+    if (alt && c.id === alt.id && c.type !== 'else_clause') {
+      // Go/Java/C#: `alternative` is the else branch itself (an if = else-if)
+      s += 1 + (IFS.has(c.type) ? ifChain(c, nest, inners) : children(c, nest + 1, inners));
+    } else if (c.type === 'else_clause') {
+      const inner = c.namedChildren.length === 1 && IFS.has(c.namedChildren[0]!.type) ? c.namedChildren[0]! : null;
       s += 1 + (inner ? ifChain(inner, nest, inners) : children(c, nest + 1, inners)); // else-if / else: +1, no nesting penalty
     } else if (c.type === 'elif_clause') s += 1 + children(c, nest + 1, inners);
     else s += visit(c, nest + 1, inners);
@@ -53,7 +61,7 @@ function ifChain(n: N, nest: number, inners: number[]): number {
 function visit(n: N, nest: number, inners: number[]): number {
   const t = n.type;
   if (isNamedFunction(n)) { inners.push(cognitiveComplexity(n, inners)); return 0; }
-  if (t === 'if_statement') return 1 + nest + ifChain(n, nest, inners);
+  if (IFS.has(t)) return 1 + nest + ifChain(n, nest, inners);
   if (LOOPS.has(t) || SWITCHES.has(t) || CATCHES.has(t) || TERNARY.has(t)) return 1 + nest + children(n, nest + 1, inners);
   if (NESTED_FN.has(t)) return children(n, nest + 1, inners);
   const op = boolOp(n);

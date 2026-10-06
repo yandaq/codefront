@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // Build config: resolve workspace deps to built dist .d.ts (default conditions).
+  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  "include": ["src"]
+}

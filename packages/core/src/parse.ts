@@ -9,7 +9,7 @@ function cxOf(n: Parser.SyntaxNode): number { const inner: number[] = []; return
 const require = createRequire(import.meta.url);
 const wasmDir = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out');
 
-export type Lang = 'typescript' | 'tsx' | 'javascript' | 'python';
+export type Lang = 'typescript' | 'tsx' | 'javascript' | 'python' | 'go' | 'java' | 'c_sharp' | 'rust';
 
 export function languageFor(file: string): Lang | null {
   const ext = path.extname(file).toLowerCase();
@@ -17,6 +17,10 @@ export function languageFor(file: string): Lang | null {
   if (ext === '.tsx') return 'tsx';
   if (['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) return 'javascript';
   if (ext === '.py' || ext === '.pyi') return 'python';
+  if (ext === '.go') return 'go';
+  if (ext === '.java') return 'java';
+  if (ext === '.cs') return 'c_sharp';
+  if (ext === '.rs') return 'rust';
   return null;
 }
 
@@ -42,12 +46,32 @@ export interface ParseResult { comments: Array<[number, number]>; items: Item[];
 
 type N = Parser.SyntaxNode;
 
-const CLASS_TYPES = new Set(['class_declaration', 'abstract_class_declaration', 'class_definition', 'class']);
-const FN_TYPES = new Set(['function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition', 'function_signature']);
+const CLASS_TYPES = new Set(['class_declaration', 'abstract_class_declaration', 'class_definition', 'class',
+  // Java / C# / Rust
+  'interface_declaration', 'enum_declaration', 'record_declaration', 'struct_declaration', 'impl_item', 'trait_item', 'mod_item']);
+const FN_TYPES = new Set(['function_declaration', 'generator_function_declaration', 'function_definition', 'method_definition', 'function_signature',
+  // Go / Java / C# / Rust
+  'method_declaration', 'constructor_declaration', 'local_function_statement', 'function_item']);
+/** Containers whose members are hoisted to the file level (C# namespaces). */
+const NAMESPACE_TYPES = new Set(['namespace_declaration', 'file_scoped_namespace_declaration']);
+const COMMENT_TYPES = new Set(['comment', 'line_comment', 'block_comment']);
+const STRING_TYPES = new Set(['string', 'template_string', 'interpreted_string_literal', 'raw_string_literal', 'string_literal', 'verbatim_string_literal']);
+const CALL_TYPES = new Set(['call_expression', 'call', 'new_expression', 'method_invocation', 'invocation_expression', 'object_creation_expression']);
 const FN_VALUE = new Set(['arrow_function', 'function_expression', 'function', 'generator_function']);
 
 function nameOf(n: N, fallback: string): string {
-  return n.childForFieldName('name')?.text ?? fallback;
+  if (n.type === 'impl_item') {
+    const t = n.childForFieldName('type')?.text, tr = n.childForFieldName('trait')?.text;
+    return t ? `impl ${tr ? `${tr} for ` : ''}${t}` : fallback;
+  }
+  const name = n.childForFieldName('name')?.text ?? fallback;
+  if (n.type === 'method_declaration') {
+    // Go method: prefix receiver type, e.g. "(*Server).Start" -> "Server.Start"
+    const recv = n.childForFieldName('receiver');
+    const t = recv?.text.match(/([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*\)\s*$/)?.[1];
+    if (t) return `${t}.${name}`;
+  }
+  return name;
 }
 
 /** Turn a node into an Item if it's a class/function (possibly wrapped in export/decorator/variable). */
@@ -63,6 +87,7 @@ function toItem(n: N, depth: number): Item | null {
   const span = { startLine: n.startPosition.row, endLine: n.endPosition.row };
   if (CLASS_TYPES.has(node.type)) {
     const body = node.childForFieldName('body');
+    if (node.type === 'mod_item' && !body) return null; // `mod foo;` declaration
     const children: Item[] = [];
     if (body && depth < 2) for (const c of body.namedChildren) { const it = toItem(c, depth + 1); if (it) children.push(it); }
     return { kind: 'class', name: nameOf(node, '(anonymous class)'), ...span, children };
@@ -99,23 +124,31 @@ export async function parseSource(text: string, lang: Lang): Promise<ParseResult
       const n = stack.pop()!;
       const imp = importOf(n, lang);
       if (imp) imports.push(...imp);
-      if (n.type === 'comment') { comments.push([n.startIndex, n.endIndex]); continue; }
+      if (COMMENT_TYPES.has(n.type)) { comments.push([n.startIndex, n.endIndex]); continue; }
       // Python docstrings: expression_statement containing only a string
       if (lang === 'python' && n.type === 'expression_statement' && n.namedChildCount === 1 && n.namedChildren[0]!.type === 'string') {
         if (!n.previousNamedSibling && (n.parent?.type === 'block' || n.parent?.type === 'module')) { comments.push([n.startIndex, n.endIndex]); docstrings.add(n.namedChildren[0]!.startIndex); }
       }
-      if ((n.type === 'string' || n.type === 'template_string') && !docstrings.has(n.startIndex) && n.parent?.type !== 'string') {
+      if (STRING_TYPES.has(n.type) && !docstrings.has(n.startIndex) && n.parent?.type !== 'string') {
         strings.push({ text: stripQuotes(n.text), startLine: n.startPosition.row, endLine: n.endPosition.row, at: n.startIndex });
-        if (n.type === 'string') continue;
+        if (n.type !== 'template_string') continue;
       }
-      if (n.type === 'call_expression' || n.type === 'call' || n.type === 'new_expression') {
-        const f = n.childForFieldName('function') ?? n.childForFieldName('constructor');
+      if (CALL_TYPES.has(n.type)) {
+        const f = n.type === 'method_invocation'
+          ? { text: [n.childForFieldName('object')?.text, n.childForFieldName('name')?.text].filter(Boolean).join('.') }
+          : n.childForFieldName('function') ?? n.childForFieldName('constructor') ?? n.childForFieldName('type');
         if (f) calls.push({ callee: f.text.replace(/\s+/g, '').slice(0, 200), text: n.text.slice(0, 600), startLine: n.startPosition.row, endLine: n.endPosition.row, at: n.startIndex });
       }
       for (const c of n.children) stack.push(c);
     }
     const items: Item[] = [];
-    for (const c of tree.rootNode.namedChildren) { const it = toItem(c, 0); if (it) items.push(it); }
+    const top = (parent: N) => {
+      for (const c of parent.namedChildren) {
+        if (NAMESPACE_TYPES.has(c.type)) { const b = c.childForFieldName('body'); top(b ?? c); continue; }
+        const it = toItem(c, 0); if (it) items.push(it);
+      }
+    };
+    top(tree.rootNode);
     const byAt = (a: { at?: number }, b: { at?: number }) => a.at! - b.at!;
     return { comments, items, strings: strings.sort(byAt), calls: calls.sort(byAt), imports };
   } finally {
@@ -125,13 +158,36 @@ export async function parseSource(text: string, lang: Lang): Promise<ParseResult
 }
 
 function stripQuotes(t: string): string {
-  const m = t.match(/^[rbuRBUfF]*('''|"""|'|"|`)([\s\S]*)\1$/);
+  const m = t.match(/^[rbuRBUfF@$]*#*('''|"""|'|"|`)([\s\S]*)\1#*$/);
   return m ? m[2]! : t;
 }
 
-const strArg = (n: N | null | undefined): string | null => (n && (n.type === 'string' || (n.type === 'template_string' && !n.namedChildren.some((c) => c.type === 'template_substitution'))) ? stripQuotes(n.text) : null);
+const strArg = (n: N | null | undefined): string | null => (n && (n.type === 'string' || n.type === 'interpreted_string_literal' || n.type === 'raw_string_literal' || (n.type === 'template_string' && !n.namedChildren.some((c) => c.type === 'template_substitution'))) ? stripQuotes(n.text) : null);
 
 function importOf(n: N, lang: Lang): ImportRef[] | null {
+  if (lang === 'go') {
+    if (n.type !== 'import_spec') return null;
+    const s = strArg(n.childForFieldName('path'));
+    return s ? [{ spec: s }] : null;
+  }
+  if (lang === 'java') {
+    if (n.type !== 'import_declaration') return null;
+    const t = n.text.replace(/^import\s+(static\s+)?/, '').replace(/;\s*$/, '').replace(/\s+/g, '');
+    return [{ spec: t }];
+  }
+  if (lang === 'c_sharp') {
+    if (n.type !== 'using_directive') return null;
+    const t = n.text.replace(/^(global\s+)?using\s+(static\s+)?/, '').replace(/;\s*$/, '').replace(/^\w+\s*=\s*/, '').trim();
+    return t ? [{ spec: t }] : null;
+  }
+  if (lang === 'rust') {
+    if (n.type === 'use_declaration') {
+      const a = n.childForFieldName('argument')?.text.replace(/\s+/g, '');
+      return a ? [{ spec: a }] : null;
+    }
+    if (n.type === 'mod_item' && !n.childForFieldName('body')) { const nm = n.childForFieldName('name')?.text; return nm ? [{ spec: `mod:${nm}` }] : null; }
+    return null;
+  }
   if (lang === 'python') {
     if (n.type === 'import_statement') {
       return n.namedChildren.map((c) => (c.type === 'aliased_import' ? c.childForFieldName('name')!.text : c.text)).map((spec) => ({ spec }));
