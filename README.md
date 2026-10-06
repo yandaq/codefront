@@ -39,7 +39,7 @@ pnpm test                          # Vitest (packages/core)
 - `GET /api/config` → `{ defaultPath }`
 - `POST /api/scan` also takes `ref` (branch) and `fetch` (remote: fetch + reset first)
 - `GET /api/cached?path=` → last persisted snapshot (instant reopen) · `GET /api/branches?path=<url>`
-- `POST /api/watch` `{ root, on }` (local only) · `GET /api/detail?root=&path=` (lazy file detail for >50k-file repos)
+- `POST /api/watch` `{ root, on }` (local only; the UI turns it on by default and remembers if you turn it off). Uncommitted local changes ship in the snapshot as `uncommitted` and pulse white on the map · `GET /api/detail?root=&path=` (lazy file detail for >50k-file repos)
 - `POST /api/auth/pat` `{ host, token }` → OS keychain
 - `GET /api/git/branches?root=` · `GET /api/commits?root=&branch=&offset=&limit=` (sha, parents, subject, author, date, +/−) · `GET /api/diff?root=&from=&to=` (per-file A/M/D/R status, counts, `-U0` hunks, per-function attribution; `root` must be a scanned root, refs strictly validated)
 - `GET /api/git/remotes?root=` · `POST /api/git/fetch?root=` (local repos only: `git fetch --prune` per remote, fetch only, never touches the work tree, index, local branches or HEAD; hooks off, no prompts, M6 token injection for https, 120 s timeout; progress as the `fetch` stage; returns remotes plus added/updated/pruned remote-tracking refs)

@@ -1,6 +1,8 @@
 import path from 'node:path';
 import type { Snapshot } from '@grim-repo/schema';
 import { scan, type ScanOptions } from './index.js';
+import { uncommittedChanges } from './changes.js';
+import { findFile } from './index.js';
 import { RepoCache, localRepoId } from './cache.js';
 import { isGitUrl, parseGitUrl, ensureClone, backfill, listBranches, currentBranch, checkoutBranch, matchBranch, type RemoteInfo } from './remote.js';
 
@@ -50,6 +52,11 @@ export async function scanTarget(input: string, opts: TargetOptions & ScanOption
   const target = await resolveTarget(input, opts);
   const cache = opts.useCache === false ? undefined : await RepoCache.open(target.id);
   const snapshot = decorateSource(await scan(target.root, { ...opts, cache, onPartial: opts.onPartial && ((s) => opts.onPartial!(decorateSource(s, target))) }), target);
+  // local git work trees: uncommitted changes (cloned remotes are reset to origin, so never have any)
+  if (!target.remote && snapshot.git?.available) {
+    const u = await uncommittedChanges(target.root, (rel) => findFile(snapshot.root, rel)).catch(() => null);
+    if (u) snapshot.uncommitted = u;
+  }
   // persist only default-option snapshots as the "reopen" snapshot
   await cache?.save(!opts.showDocs && !opts.coverageReport ? snapshot : undefined);
   return { snapshot, target, cache };

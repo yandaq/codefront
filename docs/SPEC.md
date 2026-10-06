@@ -67,7 +67,8 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Incremental rescan: cache keyed by git blob SHA (content hash for dirty working-tree files); git history fetched incrementally from last-seen commit; remote repos `git fetch` + reset.
 - Rescan animated diff: changed squares pulse, layout tweens to new sizes.
 - Cache: `~/.grim-repo/cache/<repo-id>/` — reopen is instant.
-- **Watch mode** (local repos, default off): chokidar → debounced incremental rescan.
+- **Watch mode** (local repos, default on; turning it off persists): chokidar → debounced incremental rescan. Also watches `.git/HEAD`, `index`, `refs`, `packed-refs` so `git add` / `commit` / `checkout` rescan too.
+- **Uncommitted changes**: every scan of a local git work tree records `snapshot.uncommitted` (`git diff HEAD -U0 -M` plus untracked files as fully added), attributed per file and function like the Changes diff. Drawn as a pulsing white glow (~1.4s breathing, own layer) independent of any commit selection; the committed-selection glow is static and the pulse wins on tiles with both. The Changes panel pins an "Uncommitted" row (+x −y · n files) that lists the files/functions; "Show local changes" (persisted) hides the pulse. Tooltip and inspector show uncommitted +/−.
 
 ## 7. Rendering & interaction
 - d3 (`d3.treemap` with label padding, edge bundling) computes geometry; PixiJS v8 (WebGPU, WebGL fallback) renders. Labels in an HTML/SVG overlay, only for squares big enough.

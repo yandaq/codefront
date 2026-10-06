@@ -18,10 +18,13 @@ export const relDate = (secs: number) => {
 const Counts = ({ a, d }: { a: number; d: number }) => <span className="shrink-0 tabular-nums"><span className="text-emerald-300">+{a}</span> <span className="text-rose-300">−{d}</span></span>;
 const STATUS: Record<DiffFile['status'], string> = { A: 'text-emerald-300', M: 'text-amber-300', D: 'text-rose-300', R: 'text-sky-300' };
 
-interface Props { snap: Snapshot; onChange: (c: ChangeSel | null) => void; onFly: (id: string) => void; active: ChangeSel | null }
+interface Props { snap: Snapshot; onChange: (c: ChangeSel | null) => void; onFly: (id: string) => void; active: ChangeSel | null; showLocal: boolean; setShowLocal: (v: boolean) => void }
 
 /** Mission-control "Changes" panel: branch → commit list → selection (one commit, or a shift-click range) → changed files/functions. */
-export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
+export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShowLocal }: Props) {
+  const unc = snap.uncommitted && snap.uncommitted.files.length ? snap.uncommitted : null;
+  const [local, setLocal] = useState(false);
+  useEffect(() => { if (!unc) setLocal(false); }, [unc]);
   const root = snap.source.path;
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('grim.changes.open') !== '0'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('grim.changes.open', open ? '1' : '0'); } catch { /* blocked */ } }, [open]);
@@ -118,9 +121,10 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
   const first = Math.max(0, Math.floor(scrollTop / ROW) - 4), last = Math.min(commits.length, Math.ceil((scrollTop + listH) / ROW) + 4);
   useEffect(() => { if (last >= commits.length - 10 && commits.length && !done) loadMore(); }, [last, commits.length, done, loadMore]);
 
-  const clear = () => { setSel(null); setExpanded(new Set()); };
+  const clear = () => { setSel(null); setLocal(false); setExpanded(new Set()); };
   const inRange = (i: number) => sel != null && i >= Math.min(sel.a, sel.b ?? sel.a) && i <= Math.max(sel.a, sel.b ?? sel.a);
-  const files = active?.diff.files ?? [];
+  const shown = local && unc ? unc.files : active?.diff.files;
+  const files = shown ?? [];
   const onMap = useMemo(() => files.filter((f) => f.mapPath).sort((x, y) => y.added + y.deleted - x.added - x.deleted), [files]);
   const offMap = useMemo(() => files.filter((f) => !f.mapPath), [files]);
   const toggle = (p: string) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; });
@@ -131,7 +135,7 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
       <div className="flex items-center gap-2">
         <Tip id="changes" className="shrink-0"><button className="whitespace-nowrap text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 hover:text-cyan-200" onClick={() => setOpen((o) => !o)} aria-expanded={open}>{open ? '▾' : '▸'} Changes</button></Tip>
         {active && <span className="min-w-0 flex-1 truncate text-[10px] text-amber-200/90" title={active.label} data-changes-label>{active.label}</span>}
-        {sel && <Tip id="changesClear" className="ml-auto shrink-0"><button data-changes-clear onClick={clear} className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-400/50 hover:text-cyan-200">Clear</button></Tip>}
+        {(sel || local) && <Tip id="changesClear" className="ml-auto shrink-0"><button data-changes-clear onClick={clear} className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-400/50 hover:text-cyan-200">Clear</button></Tip>}
       </div>
       {open && git === false && <div className="mt-2 text-slate-500">No git history</div>}
       {open && git && (
@@ -148,13 +152,25 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
           </div>
           {fetching && <div data-fetch-progress className="mt-1 truncate text-[10px] text-cyan-200/80">{fetching.msg} {Math.round(fetching.pct * 100)}%</div>}
           {fetchMsg && <div data-fetch-result className={`mt-1 flex gap-1 text-[10px] ${fetchMsg.ok ? 'text-emerald-300' : 'text-rose-300'}`}><span className="min-w-0 flex-1 break-words">{fetchMsg.text}</span><button aria-label="dismiss" className="text-slate-500 hover:text-slate-300" onClick={() => setFetchMsg(null)}>×</button></div>}
+          {unc && (
+            <Tip id="changesUncommitted" block className="mt-2">
+              <button data-uncommitted-row onClick={() => { setSel(null); setLocal((l) => !l); }}
+                className={`flex w-full flex-col rounded border px-2 py-1 text-left ${local ? 'border-white/40 bg-white/10' : 'border-white/15 hover:bg-white/5'}`}>
+                <div className="flex w-full items-center gap-2"><span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.9)]" /><span className="text-slate-100">Uncommitted</span>
+                  <span className="ml-auto text-[10px] text-slate-400"><Counts a={unc.added} d={unc.deleted} /> · {unc.files.length} file{unc.files.length === 1 ? '' : 's'}</span></div>
+              </button>
+            </Tip>
+          )}
+          <Tip id="changesShowLocal" block className="mt-1">
+            <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-slate-400"><input type="checkbox" data-show-local checked={showLocal} onChange={(e) => setShowLocal(e.target.checked)} className="accent-white" />Show local changes</label>
+          </Tip>
           <Tip id="changesCommits" block className="mt-2 flex min-h-[76px] shrink flex-col" >
             <div ref={listRef} data-commit-list onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="h-56 min-h-[76px] shrink overflow-y-auto rounded border border-slate-700/60 bg-slate-950/40">
               <div style={{ height: commits.length * ROW, position: 'relative' }}>
                 {commits.slice(first, last).map((c, k) => {
                   const i = first + k;
                   return (
-                    <button key={c.sha} data-commit={c.sha} onClick={(e) => setSel((s) => (e.shiftKey && s ? { a: s.a, b: i } : { a: i }))}
+                    <button key={c.sha} data-commit={c.sha} onClick={(e) => { setLocal(false); setSel((s) => (e.shiftKey && s ? { a: s.a, b: i } : { a: i })); }}
                       style={{ position: 'absolute', top: i * ROW, height: ROW, left: 0, right: 0 }}
                       className={`flex flex-col justify-center border-b border-slate-800/60 px-2 text-left ${inRange(i) ? 'bg-amber-400/15' : 'hover:bg-cyan-400/5'}`}>
                       <div className="flex w-full items-center gap-2"><span className="text-cyan-300">{short(c.sha)}</span><span className="truncate text-slate-200">{c.subject}</span></div>
@@ -166,12 +182,12 @@ export function ChangesPanel({ snap, onChange, onFly, active }: Props) {
               {!commits.length && <div className="p-2 text-slate-500">{done ? 'No commits' : 'Loading…'}</div>}
             </div>
           </Tip>
-          {!sel && commits.length > 0 && <div className="mt-1 text-[10px] text-slate-500">click a commit · shift-click a second for a range</div>}
+          {!sel && !local && commits.length > 0 && <div className="mt-1 text-[10px] text-slate-500">click a commit · shift-click a second for a range</div>}
           {err && <div className="mt-1 text-rose-300">{err}</div>}
-          {sel && (
+          {(sel || local) && (
             <div data-changed-files className="mt-2 min-h-[60px] shrink overflow-y-auto" style={{ maxHeight: 220 }}>
-              {busy && !active && <div className="text-slate-500">Diffing…</div>}
-              {active && (
+              {busy && !shown && <div className="text-slate-500">Diffing…</div>}
+              {shown && (
                 <>
                   <div className="mb-1 text-[10px] text-slate-400">{files.length} files · <Counts a={files.reduce((s, f) => s + f.added, 0)} d={files.reduce((s, f) => s + f.deleted, 0)} /></div>
                   {onMap.map((f) => (

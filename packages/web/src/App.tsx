@@ -22,6 +22,8 @@ export function App() {
   const [stageMsg, setStageMsg] = useState<string | undefined>(undefined);
   const [branches, setBranches] = useState<string[]>([]);
   const [watching, setWatching] = useState(false);
+  /** User preference: watch local repos (default on, persisted). */
+  const watchPref = useRef((() => { try { return localStorage.getItem('grim.watch') !== '0'; } catch { return true; } })());
   const [keytar, setKeytar] = useState<boolean | null>(null);
   const [pat, setPat] = useState<{ host: string; token: string } | null>(null);
   /** The target the user asked for (path or URL); progress messages are tagged with it. */
@@ -39,6 +41,9 @@ export function App() {
   const edges = useMemo(() => (snap ? couplingEdges(snap, coup) : []), [snap, coup]);
   const hoverCoupling = useMemo(() => (hover && snap ? couplingStats(snap, hover.node) : null), [hover, snap]);
   const [changes, setChanges] = useState<ChangeSel | null>(null);
+  const [showLocal, setShowLocal] = useState(() => { try { return localStorage.getItem('grim.showLocal') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('grim.showLocal', showLocal ? '1' : '0'); } catch { /* blocked */ } }, [showLocal]);
+  const uncAgg = useMemo(() => (snap?.uncommitted && Object.keys(snap.uncommitted.nodes).length ? aggregateChanges(snap.root, snap.uncommitted.nodes) : null), [snap]);
   const changeAgg = useMemo(() => (snap && changes ? aggregateChanges(snap.root, changes.diff.nodes) : null), [snap, changes]);
   const layerPainter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
   const hits = useMemo(() => (snap ? hitCounts(snap) : new Map()), [snap]);
@@ -69,6 +74,7 @@ export function App() {
     for (const [p, cs] of Object.entries(changes.diff.touched)) if (file ? p === file.path : n.id === '' || p.startsWith(n.path + '/')) cs.forEach((c) => shas.add(c));
     return { a: v?.a ?? 0, d: v?.d ?? 0, commits: [...shas].map((s) => changes.subjects.get(s) ?? { sha: s, subject: '' }) };
   };
+  const uncInfo = (n: TreeNode | null) => { const v = n && uncAgg?.get(n.id); return v ? { a: v.a, d: v.d, added: v.s === 'A' } : null; };
   const selNode = selected != null ? ix?.byId.get(selected) ?? null : null;
   const select = (n: TreeNode | null) => { setSelected(n ? n.id : null); if (!n) setPeek(null); };
   const selectAndFly = (id: string) => { if (!ix?.byId.has(id)) return; setSelected(id); setFocusReq({ id, n: Date.now() }); };
@@ -90,7 +96,7 @@ export function App() {
   const run = async (p: string, o: { ref?: string; fetch?: boolean; rescan?: boolean } = {}) => {
     if (!p) return;
     const fresh = target.current !== p;
-    if (fresh && watching) { setWatching(false); }
+    if (fresh && watching) { const old = snap?.source.path; setWatching(false); if (old) fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: old, on: false }) }).catch(() => {}); }
     target.current = p;
     setLoading(true); loadingRef.current = true; setError(null); setStages({}); setStageMsg(undefined);
     try {
@@ -106,6 +112,10 @@ export function App() {
       setAgeProgress(body.git?.available ? 0 : undefined);
       if (fresh) setAges({});
       setSnap(body);
+      if (body.source?.type !== 'remote' && watchPref.current) {
+        fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: body.source.path, on: true }) })
+          .then((r) => r.json()).then((b) => { if (target.current === p) setWatching(!!b.watching); }).catch(() => {});
+      }
       if (body.source?.type === 'remote') fetch(`/api/branches?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((b) => setBranches(b.branches ?? [])).catch(() => {});
       else setBranches([]);
       const u = new URL(location.href); u.searchParams.set('path', p); history.replaceState(null, '', u);
@@ -124,6 +134,8 @@ export function App() {
     const b = await r.json();
     if (!r.ok) { setError(b.error); return; }
     setWatching(b.watching);
+    watchPref.current = on;
+    try { localStorage.setItem('grim.watch', on ? '1' : '0'); } catch { /* blocked */ }
   };
   const savePat = async () => {
     if (!pat?.token) return;
@@ -178,10 +190,10 @@ export function App() {
   }, []);
 
   return (
-    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-fill={layer}>
-      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} changes={changeAgg} />}
+    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-uncommitted-tiles={uncAgg && showLocal ? uncAgg.size : 0} data-watching={watching ? '1' : '0'} data-fill={layer}>
+      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} changes={changeAgg} uncommitted={showLocal ? uncAgg : null} />}
       {snap && <div className="pointer-events-none absolute bottom-8 left-3 top-32 flex flex-col items-start justify-start">
-      <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} />
+      <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} showLocal={showLocal} setShowLocal={setShowLocal} />
       </div>}
       {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
       <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
@@ -193,6 +205,7 @@ export function App() {
           <div className="truncate text-cyan-200">{hover.node.path || '/'}{hover.node.kind !== 'file' && hover.node.kind !== 'folder' ? ` › ${hover.node.name}` : ''}</div>
           <div className="mt-0.5 text-slate-400">{hover.node.kind} · {hover.node.sloc.toLocaleString()} SLOC</div>
           {changeAgg && (() => { const v = changeAgg.get(hover.node.id); return <div className={`mt-0.5 ${v ? 'text-white' : 'text-slate-500'}`}>selected commits: {v ? `${v.s === 'A' ? 'added ' : ''}+${v.a} −${v.d}` : 'unchanged'}</div>; })()}
+          {(() => { const u = uncInfo(hover.node); return u ? <div className="mt-0.5 text-white">uncommitted {u.added ? 'added ' : ''}+{u.a} −{u.d}</div> : null; })()}
           {layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
           {hoverCoupling && (hoverCoupling.inc > 0 || hoverCoupling.out > 0) && <div className="mt-0.5 text-sky-300">imports: {hoverCoupling.out} out · {hoverCoupling.inc} in</div>}
           {hoverCoupling?.top && <div className="mt-0.5 truncate text-fuchsia-300">co-change: {hoverCoupling.top.path} ({Math.round(hoverCoupling.top.conf * 100)}%, {hoverCoupling.top.n} commits)</div>}
@@ -204,7 +217,7 @@ export function App() {
           )}
         </div>
       )}
-      {snap && ix && rows && selNode && <Inspector snap={snap} node={selNode} ix={ix} rows={rows} onSelect={selectAndFly} onPeek={setPeek} onClose={() => select(null)} editor={editor} setEditor={setEditor} changes={changeInfo(selNode)} />}
+      {snap && ix && rows && selNode && <Inspector snap={snap} node={selNode} ix={ix} rows={rows} onSelect={selectAndFly} onPeek={setPeek} onClose={() => select(null)} editor={editor} setEditor={setEditor} changes={changeInfo(selNode)} uncommitted={uncInfo(selNode)} />}
       {snap && peek && <CodePeek snap={snap} req={peek} editor={editor} onClose={() => setPeek(null)} />}
       {snap && ix && palette && <Palette all={ix.all} onClose={() => setPalette(false)} onPick={(n) => { setPalette(false); selectAndFly(n.id); }} />}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 p-3">
@@ -227,7 +240,7 @@ export function App() {
               onClick={() => run(target.current || path, { fetch: snap.source.type === 'remote', ref: snap.source.ref, rescan: true })}>↻ Rescan</button>
           )}
           {snap && snap.source.type !== 'remote' && (
-            <button type="button" aria-pressed={watching} data-testid="watch-toggle" onClick={toggleWatch} title="Watch mode: rescan on file changes"
+            <button type="button" aria-pressed={watching} data-testid="watch-toggle" onClick={toggleWatch} title="Watch mode (on by default for local repos): rescan on file edits and git add / commit / checkout"
               className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs ${watching ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-200' : 'border-slate-600 text-slate-400 hover:text-slate-200'}`}>
               <span className={`h-2 w-2 rounded-full ${watching ? 'animate-pulse bg-emerald-300' : 'bg-slate-600'}`} />Watch
             </button>

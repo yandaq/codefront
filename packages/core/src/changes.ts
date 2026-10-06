@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { TreeNode } from '@grim-repo/schema';
 import { listBranches } from './remote.js';
 
@@ -143,7 +145,12 @@ export async function diffRange(root: string, fromRef: string, toRef: string, fi
   for (const l of log.split('\n')) {
     if (l.startsWith('@@')) { cur = l.slice(2); commits++; } else if (l) (touched[l] ??= []).push(cur);
   }
-  const laterBy = new Map(later.map((p) => [p.oldPath ?? p.path, p]));
+  const { files, nodes } = attribute(patches, new Map(later.map((p) => [p.oldPath ?? p.path, p])), findFile);
+  return { from, to, commits, files, nodes, touched };
+}
+
+/** Attribute patches to snapshot files/functions; `laterBy` maps a patch's new-side path to its diff against the work tree. */
+function attribute(patches: FilePatch[], laterBy: Map<string, FilePatch>, findFile: (rel: string) => TreeNode | null): { files: DiffFile[]; nodes: Record<string, NodeChange> } {
   const nodes: Record<string, NodeChange> = {};
   const files: DiffFile[] = patches.map((p) => {
     const lp = p.status === 'D' ? undefined : laterBy.get(p.path);
@@ -168,5 +175,27 @@ export async function diffRange(root: string, fromRef: string, toRef: string, fi
     res.fns.sort((x, y) => y.a + y.d - x.a - x.d);
     return res;
   });
-  return { from, to, commits, files, nodes, touched };
+  return { files, nodes };
+}
+
+export interface Uncommitted { added: number; deleted: number; files: DiffFile[]; nodes: Record<string, NodeChange> }
+
+/**
+ * Local, not-yet-committed changes: `git diff HEAD` (staged + unstaged) plus untracked files (as fully added).
+ * The new side is the work tree, i.e. the snapshot itself, so lines map directly. null if not a git work tree.
+ */
+export async function uncommittedChanges(root: string, findFile: (rel: string) => TreeNode | null): Promise<Uncommitted | null> {
+  try { await git(root, ['rev-parse', '--is-inside-work-tree']); } catch { return null; }
+  const head = await git(root, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']).then((s) => s.trim()).catch(() => EMPTY_TREE);
+  const [patches, others] = await Promise.all([
+    git(root, ['diff', '--unified=0', '-M', '--relative', '--no-color', '--no-ext-diff', head || EMPTY_TREE, '--', '.']).then(parseDiff),
+    git(root, ['ls-files', '-z', '--others', '--exclude-standard', '--', '.']).then((s) => s.split('\0').filter(Boolean)),
+  ]);
+  for (const rel of others) {
+    let n = 0;
+    try { const t = await readFile(path.join(root, rel), 'utf8'); n = t ? t.split('\n').length - (t.endsWith('\n') ? 1 : 0) : 0; } catch { continue; }
+    patches.push({ path: rel, status: 'A', added: n, deleted: 0, hunks: n ? [[0, 0, 1, n]] : [] });
+  }
+  const { files, nodes } = attribute(patches, new Map(), findFile);
+  return { added: files.reduce((s, f) => s + f.added, 0), deleted: files.reduce((s, f) => s + f.deleted, 0), files, nodes };
 }

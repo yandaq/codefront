@@ -21,11 +21,13 @@ export const TIPS = {
   cochange: 'Edges between files that are committed together, from git history. Hidden code dependencies show up here even with no import.',
   minConf: 'Minimum confidence: how often a change to one file also changed the other, as a percentage. Raise it to show only strong pairs.',
   minCommits: 'Minimum number of shared commits before a pair is drawn; filters out one-off coincidences.',
-  changes: 'Changes between commits: pick one commit (vs its first parent) or shift-click a second for a range. Changed files and functions get a white glow outline on top of whichever fill layer is active (stronger glow = more lines changed; added tiles have a double outline); folders with changes get a faint border. The layout stays the current snapshot. Click to collapse.',
+  changes: 'Changes between commits: pick one commit (vs its first parent) or shift-click a second for a range. Changed files and functions get a white glow outline on top of whichever fill layer is active (stronger glow = more lines changed; added tiles have a double outline; the glow is steady, while uncommitted local changes pulse); folders with changes get a faint border. The layout stays the current snapshot. Click to collapse.',
   changesBranch: 'Branch whose history is listed. Local repos list local branches (current by default) and remote-tracking branches (origin/*); cloned remotes list the remote branches.',
   changesFetch: 'Downloads all branches and commits from your remotes (git fetch --all --prune). Your files and local branches are not changed.',
   changesCommits: 'Commits on the branch, newest first, with lines added/removed. Click one to see its changes; shift-click another to see the combined range older^..newer (both endpoints included).',
   changesClear: 'Clear the selection and remove the change glows (Esc also clears while this panel has focus).',
+  changesUncommitted: 'Local changes not yet committed: staged and unstaged edits vs HEAD, plus untracked files (counted as added). Click to list the changed files and functions. These tiles pulse white on the map; with Watch on they update as you edit, stage or commit.',
+  changesShowLocal: 'Show or hide the pulsing glow for uncommitted local changes. The committed-selection glow is unaffected.',
   changesOffMap: 'Files deleted or renamed away since the selected commits, so they have no tile in the current snapshot.',
 } as const;
 export type TipId = keyof typeof TIPS;

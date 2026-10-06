@@ -12,6 +12,8 @@ interface Props {
   editor: Editor; setEditor: (e: Editor) => void;
   /** +/- and touching commits within the Changes panel's selection, if any. */
   changes?: { a: number; d: number; commits: { sha: string; subject: string }[] } | null;
+  /** Uncommitted local +/- for this node, if any. */
+  uncommitted?: { a: number; d: number; added: boolean } | null;
 }
 
 const inside = (n: TreeNode, id?: string) => id != null && (id === n.id || (n.kind === 'folder' ? n.id === '' || id.startsWith(n.id + '/') : id.startsWith(n.id + '#') || id.startsWith(n.id + '/')));
@@ -48,7 +50,7 @@ function Snippet({ code, path, language }: { code: string; path: string; languag
   );
 }
 
-export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, editor, setEditor, changes }: Props) {
+export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, editor, setEditor, changes, uncommitted }: Props) {
   const file = node.kind === 'folder' ? null : ix.fileOf.get(node.id) ?? null;
   const g = node.git ?? file?.git;
   const git = snap.git;
@@ -100,6 +102,9 @@ export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, edi
         )}
       </div>
       <div className="flex-1 overflow-y-auto">
+        {uncommitted && (
+          <div data-inspector-uncommitted className="flex justify-between"><span className="text-slate-400">Uncommitted</span><span>{uncommitted.added && <span className="text-slate-400">added </span>}<span className="text-emerald-300">+{uncommitted.a}</span> <span className="text-rose-300">−{uncommitted.d}</span></span></div>
+        )}
         {changes && (
           <Section title="In selected commits">
             <div className="flex justify-between"><span className="text-slate-400">Lines</span><span><span className="text-emerald-300">+{changes.a}</span> <span className="text-rose-300">−{changes.d}</span></span></div>

@@ -140,4 +140,38 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       srv.kill();
     }
   }, 60000);
+
+  it('uncommitted changes pulse live with watch on by default, and clear after a commit', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-unc-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, env });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x;\n}\n');
+    git('add', '-A'); git('commit', '-qm', 'one');
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const browser = await chromium.launch();
+    try {
+      const url = await new Promise<string>((res, rej) => {
+        let out = '';
+        srv.stdout.on('data', (d) => { out += d; const m = /running at (\S+)/.exec(out); if (m) res(m[1]!); });
+        srv.on('exit', () => rej(new Error(`server exited: ${out}`)));
+      });
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(url);
+      const unc = () => page.evaluate(() => Number(document.querySelector<HTMLElement>('[data-uncommitted-tiles]')?.dataset.uncommittedTiles ?? -1));
+      await expect.poll(() => page.locator('[data-watch-toggle], [data-testid="watch-toggle"]').getAttribute('aria-pressed'), { timeout: 15000 }).toBe('true');
+      expect(await unc()).toBe(0);
+      await page.waitForTimeout(500); // let the watcher settle
+      writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x + 1;\n}\n');
+      await expect.poll(unc, { timeout: 15000 }).toBeGreaterThan(0);
+      await expect.poll(() => page.locator('[data-uncommitted-row]').textContent()).toContain('1 file');
+      git('commit', '-qam', 'two'); // no file content changes: only .git/index + refs move
+      await expect.poll(unc, { timeout: 15000 }).toBe(0);
+      expect(await page.locator('[data-uncommitted-row]').count()).toBe(0);
+    } finally {
+      await browser.close();
+      srv.kill();
+    }
+  }, 60000);
 });

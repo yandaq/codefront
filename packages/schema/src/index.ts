@@ -107,6 +107,16 @@ export const CouplingSchema = z.object({
 });
 export type Coupling = z.infer<typeof CouplingSchema>;
 
+const ChangeSchema = z.object({ a: z.number(), d: z.number(), s: z.enum(['A', 'M']) });
+export const UncommittedSchema = z.object({
+  added: z.number(), deleted: z.number(),
+  files: z.array(z.object({ path: z.string(), oldPath: z.string().optional(), status: z.enum(['A', 'M', 'D', 'R']), added: z.number(), deleted: z.number(),
+    hunks: z.array(z.tuple([z.number(), z.number(), z.number(), z.number()])), mapPath: z.string().nullable(),
+    fns: z.array(ChangeSchema.extend({ id: z.string(), name: z.string() })) })),
+  nodes: z.record(ChangeSchema),
+});
+export type Uncommitted = z.infer<typeof UncommittedSchema>;
+
 export const SnapshotSchema = z.object({
   version: z.literal(1),
   createdAt: z.string(),
@@ -128,6 +138,8 @@ export const SnapshotSchema = z.object({
   coverage: CoverageSchema.optional(),
   hits: z.array(HitSchema).optional(),
   coupling: CouplingSchema.optional(),
+  /** Local git repos: uncommitted changes (HEAD -> work tree, plus untracked files), attributed to files/functions. */
+  uncommitted: UncommittedSchema.optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 

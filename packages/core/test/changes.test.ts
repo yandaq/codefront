@@ -104,3 +104,36 @@ describe('changes / diff', () => {
     expect(await resolveRef(dir, 'main')).toBe(sha.c4);
   });
 });
+
+describe('uncommitted changes', () => {
+  it('modified, staged, untracked and deleted files; empty after commit', async () => {
+    const d = mkdtempSync(path.join(tmpdir(), 'grim-unc-'));
+    const wr = (rel: string, s: string) => writeFileSync(path.join(d, rel), s);
+    const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: d, env });
+    g('init', '-q', '-b', 'main');
+    wr('mod.ts', fn('f', 3) + '\n' + fn('g', 3));
+    wr('staged.ts', fn('s', 3));
+    wr('del.ts', fn('gone', 3));
+    g('add', '-A'); g('commit', '-q', '-m', 'c1');
+    wr('mod.ts', fn('f', 3) + '\n' + fn('g', 3).replace('x = x + 1;', 'x = x * 2;')); // unstaged: one line in g
+    wr('staged.ts', fn('s', 3) + fn('s2', 2)); g('add', 'staged.ts'); // staged: new function appended
+    wr('untracked.ts', fn('u', 2));
+    rmSync(path.join(d, 'del.ts'));
+    const { scanTarget } = await import('../src/index.js');
+    const { snapshot: s } = await scanTarget(d, { useCache: false });
+    const u = s.uncommitted!;
+    expect(u).toBeTruthy();
+    const by = Object.fromEntries(u.files.map((f) => [f.path, f]));
+    expect(by['mod.ts']).toMatchObject({ status: 'M', added: 1, deleted: 1 });
+    expect(by['mod.ts']!.fns.map((x) => [x.name, x.a, x.d, x.s])).toEqual([['g', 1, 1, 'M']]);
+    expect(by['staged.ts']).toMatchObject({ status: 'M', added: 5, deleted: 0 });
+    expect(by['staged.ts']!.fns.find((x) => x.name === 's2')).toMatchObject({ a: 5, s: 'A' });
+    expect(by['untracked.ts']).toMatchObject({ status: 'A', added: 5, mapPath: 'untracked.ts' });
+    expect(u.nodes[findFile(s.root, 'untracked.ts')!.id]!.s).toBe('A');
+    expect(by['del.ts']).toMatchObject({ status: 'D', mapPath: null });
+    g('add', '-A'); g('commit', '-q', '-m', 'c2');
+    const { snapshot: s2 } = await scanTarget(d, { useCache: false });
+    expect(s2.uncommitted!.files).toEqual([]);
+  });
+});

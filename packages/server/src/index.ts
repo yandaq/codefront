@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -131,7 +132,14 @@ export async function startServer(opts: ServerOptions = {}) {
     if (!req.body?.on) { await existing?.close(); watchers.delete(root); return { watching: false }; }
     if (existing) return { watching: true };
     const ignored = await ignoreFilter(root);
-    const w = chokidarWatch(root, { ignored: (p: string) => ignored(p), ignoreInitial: true, awaitWriteFinish: false });
+    // Work tree (minus ignored paths and .git internals), plus the bits of .git that change the uncommitted set
+    // without touching files: HEAD (checkout), index (add / commit) and refs (commit / reset).
+    const gitDir = await new Promise<string>((res) => execFile('git', ['rev-parse', '--absolute-git-dir'], { cwd: root }, (e, out) => res(e ? path.join(root, '.git') : out.trim())));
+    const gitPaths = existsSync(gitDir) ? ['HEAD', 'index', 'refs', 'packed-refs'].map((f) => path.join(gitDir, f)) : [];
+    const w = chokidarWatch([root, ...gitPaths], {
+      ignored: (p: string) => { if (p === gitDir || p.startsWith(gitDir + path.sep)) return !gitPaths.some((g) => p === g || p.startsWith(g + path.sep)) && p !== gitDir; return ignored(p); },
+      ignoreInitial: true, awaitWriteFinish: false,
+    });
     let timer: NodeJS.Timeout | null = null;
     w.on('all', () => {
       if (timer) clearTimeout(timer);

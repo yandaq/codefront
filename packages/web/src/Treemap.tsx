@@ -22,6 +22,8 @@ interface Props {
   exploded?: number;
   /** Changes overlay (rolled up to ancestors); drawn as white glows above the fill, never replacing it. */
   changes?: Map<string, NodeChange> | null;
+  /** Uncommitted local changes (rolled up); drawn as a pulsing white glow on its own layer, above the static changes glow. */
+  uncommitted?: Map<string, NodeChange> | null;
   edgeMode: 'imports' | 'cochange';
   selectedId: string | null;
   onSelect: (n: TreeNode | null) => void;
@@ -138,7 +140,7 @@ function explode(root: RNode, k: number) {
   place(root, (root.x0 + root.x1) / 2 + r.cx, (root.y0 + root.y1) / 2 + r.cy);
 }
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = 0, changes = null }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = 0, changes = null, uncommitted = null }: Props) {
   const explodeRef = useRef(exploded); explodeRef.current = exploded;
   const selRef = useRef(selectedId); selRef.current = selectedId;
   const selectCb = useRef(onSelect); selectCb.current = onSelect;
@@ -154,6 +156,13 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
     chRef.current = { m: changes, max };
     kick.current();
   }, [changes]);
+  const ucRef = useRef<{ m: Map<string, NodeChange> | null; max: number }>({ m: null, max: 1 });
+  useEffect(() => {
+    let max = 1;
+    uncommitted?.forEach((v) => { max = Math.max(max, v.a + v.d); });
+    ucRef.current = { m: uncommitted, max };
+    kick.current();
+  }, [uncommitted]);
   const paint = useRef({ cur: painter, prev: painter, t0: 0 });
   const hoverCb = useRef(onHover); hoverCb.current = onHover;
   const kick = useRef<() => void>(() => {});
@@ -281,7 +290,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       eg.blendMode = 'add'; pg.blendMode = 'add';
       // changes overlay: own layer so the breathing pulse is just an alpha tweak (no geometry rebuild)
       const cg = new Graphics();
-      app.stage.addChild(cg, eg, pg);
+      // uncommitted overlay: crisp layer + wide outer halo layer, both pulsed via alpha only
+      const ug = new Graphics(), uh = new Graphics();
+      app.stage.addChild(cg, uh, ug, eg, pg);
       let hoverNode: RNode | null = null;
       let edgeBuilt = { v: -1, k: 0, x: 0, y: 0, hover: null as RNode | null };
       const litNode = () => hoverNode ?? (selRef.current != null ? byId.get(selRef.current) ?? null : null);
@@ -414,8 +425,10 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         };
         dirty = false;
 
-        g.clear(); cg.clear();
+        g.clear(); cg.clear(); ug.clear(); uh.clear();
         const ch = chRef.current; const chLog = Math.log1p(ch.max);
+        const uc = ucRef.current; const ucLog = Math.log1p(uc.max);
+        const uglows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
         const glows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
         const W = app.screen.width, H = app.screen.height;
         let li = 0, pi = 0;
@@ -499,6 +512,12 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             const faint = d.kind === 'folder' || (d.kind === 'file' && expand && n.children!.some((c) => ch.m!.has(c.data.id)));
             glows.push({ x: x0, y: y0, w, h, s: Math.log1p(cv.a + cv.d) / chLog, added: cv.s === 'A', faint });
           }
+          const uv = uc.m?.get(d.id);
+          if (uv && !intro) {
+            const faint = d.kind === 'folder' || (d.kind === 'file' && expand && n.children!.some((c) => uc.m!.has(c.data.id)));
+            uglows.push({ x: x0, y: y0, w, h, s: Math.log1p(uv.a + uv.d) / ucLog, added: uv.s === 'A', faint });
+            if (!faint && cv && glows.length && glows[glows.length - 1]!.x === x0 && glows[glows.length - 1]!.y === y0) glows.pop(); // the pulse wins
+          }
           if (expand) {
             for (const c of n.children!) { const r = visit(c); covered.llm += r.llm; covered.sql += r.sql; }
           }
@@ -530,6 +549,20 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           cg.rect(q.x + 0.75, q.y + 0.75, Math.max(0, q.w - 1.5), Math.max(0, q.h - 1.5)).stroke({ width: 2, color: 0xffffff, alpha: 0.85 + 0.15 * s });
           if (q.added && q.w > 10 && q.h > 10) cg.rect(q.x + 4, q.y + 4, q.w - 8, q.h - 8).stroke({ width: 1, color: 0xffffff, alpha: 0.6 }); // added: double stroke
         }
+        // uncommitted overlay: brighter, wider halo than the committed glow; pulsed by the ticker
+        for (const q of uglows) {
+          if (q.faint) { ug.rect(q.x + 0.5, q.y + 0.5, Math.max(0, q.w - 1), Math.max(0, q.h - 1)).stroke({ width: 1, color: 0xffffff, alpha: 0.22 }); continue; }
+          const s = 0.35 + 0.65 * q.s, halo = 5 + 9 * s;
+          for (let i = 3; i >= 1; i--) {
+            const o = (halo * i) / 3;
+            uh.rect(q.x - o, q.y - o, q.w + 2 * o, q.h + 2 * o).stroke({ width: halo / 3 + 1, color: 0xffffff, alpha: (0.12 + 0.2 * s) * Math.pow(1 - (i - 1) / 3, 1.4) });
+          }
+          ug.rect(q.x - 1.5, q.y - 1.5, q.w + 3, q.h + 3).stroke({ width: 3, color: 0xffffff, alpha: 0.35 + 0.25 * s });
+          ug.rect(q.x + 0.75, q.y + 0.75, Math.max(0, q.w - 1.5), Math.max(0, q.h - 1.5)).stroke({ width: 2, color: 0xffffff, alpha: 0.95 });
+          if (q.w > 6 && q.h > 6) ug.rect(q.x, q.y, q.w, q.h).fill({ color: 0xffffff, alpha: 0.06 + 0.06 * s });
+          if (q.added && q.w > 10 && q.h > 10) ug.rect(q.x + 4, q.y + 4, q.w - 8, q.h - 8).stroke({ width: 1, color: 0xffffff, alpha: 0.6 });
+        }
+        if (el.dataset.uncommittedDrawn !== String(uglows.length)) el.dataset.uncommittedDrawn = String(uglows.length); // test hook
         if (el.dataset.changedDrawn !== String(glows.length)) el.dataset.changedDrawn = String(glows.length); // test hook
         // persistent selection highlight
         const sn = selRef.current != null ? byId.get(selRef.current) : undefined;
@@ -560,7 +593,11 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         for (let i = li; i < labelPool.length; i++) labelPool[i]!.style.display = 'none';
         for (let i = pi; i < pinPool.length; i++) pinPool[i]!.style.display = 'none';
       };
-      app.ticker.add(() => { const now = performance.now(); draw(now); cg.alpha = 0.85 + 0.15 * Math.sin((now / 2000) * Math.PI * 2); });
+      app.ticker.add(() => { const now = performance.now(); draw(now);
+        // committed glow is static; the uncommitted pulse breathes (~1.4s): crisp layer dips a little, outer halo swells and fades
+        const ph = 0.5 - 0.5 * Math.cos((now / 1400) * Math.PI * 2);
+        ug.alpha = 0.55 + 0.45 * ph; uh.alpha = 0.15 + 0.85 * ph;
+      });
       kick.current = () => { dirty = true; };
 
       // ---- interaction ----
