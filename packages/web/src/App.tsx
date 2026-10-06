@@ -3,6 +3,7 @@ import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode } from '@grim-rep
 import { LayerDock, type PinState } from './LayerDock';
 import { hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
 import { Treemap } from './Treemap';
+import { couplingEdges, couplingStats, type CouplingOptions } from './coupling';
 
 export function App() {
   const [path, setPath] = useState('');
@@ -17,6 +18,9 @@ export function App() {
   const [hover, setHover] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
   const [cx, setCx] = useState<CxOptions>({ mode: 'max', absolute: false });
   const [pins, setPins] = useState<PinState>({ llm: true, sql: true });
+  const [coup, setCoup] = useState<CouplingOptions>({ on: false, mode: 'imports', minConf: 30, minCommits: 5 });
+  const edges = useMemo(() => (snap ? couplingEdges(snap, coup) : []), [snap, coup]);
+  const hoverCoupling = useMemo(() => (hover && snap ? couplingStats(snap, hover.node) : null), [hover, snap]);
   const painter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
   const hits = useMemo(() => (snap ? hitCounts(snap) : new Map()), [snap]);
   const hitTotals = useMemo(() => ({ llm: snap?.hits?.filter((h) => h.kind === 'llm').length ?? 0, sql: snap?.hits?.filter((h) => h.kind === 'sql').length ?? 0 }), [snap]);
@@ -68,14 +72,17 @@ export function App() {
 
   return (
     <div className="relative h-full w-full font-sans">
-      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} />}
+      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} />}
       {snap && <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ age: ageProgress }}
-        cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals} />}
+        cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals}
+        coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />}
       {hover && painter && (
         <div className="glass pointer-events-none fixed z-10 max-w-sm rounded-lg px-3 py-2 font-mono text-xs" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <div className="truncate text-cyan-200">{hover.node.path || '/'}{hover.node.kind !== 'file' && hover.node.kind !== 'folder' ? ` › ${hover.node.name}` : ''}</div>
           <div className="mt-0.5 text-slate-400">{hover.node.kind} · {hover.node.sloc.toLocaleString()} SLOC</div>
           {layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
+          {hoverCoupling && (hoverCoupling.inc > 0 || hoverCoupling.out > 0) && <div className="mt-0.5 text-sky-300">imports: {hoverCoupling.out} out · {hoverCoupling.inc} in</div>}
+          {hoverCoupling?.top && <div className="mt-0.5 truncate text-fuchsia-300">co-change: {hoverCoupling.top.path} ({Math.round(hoverCoupling.top.conf * 100)}%, {hoverCoupling.top.n} commits)</div>}
           {hoverHits && (hoverHits.llm > 0 || hoverHits.sql > 0) && (
             <div className="mt-0.5 flex gap-3">
               {hoverHits.llm > 0 && <span className="text-cyan-300">● {hoverHits.llm} LLM prompt{hoverHits.llm > 1 ? 's' : ''}</span>}

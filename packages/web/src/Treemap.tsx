@@ -4,6 +4,7 @@ import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } fr
 import type { Snapshot, TreeNode } from '@grim-repo/schema';
 import type { HitCounts, Painter } from './layers';
 import type { PinState } from './LayerDock';
+import type { Edge } from './coupling';
 
 type RNode = HierarchyRectangularNode<TreeNode>;
 interface Cam { x: number; y: number; k: number }
@@ -15,6 +16,8 @@ interface Props {
   onHover: (h: { node: TreeNode; x: number; y: number } | null) => void;
   pins: PinState;
   hits: Map<string, HitCounts>;
+  edges: Edge[];
+  edgeMode: 'imports' | 'cochange';
 }
 const FADE_MS = 400;
 
@@ -22,6 +25,7 @@ const WORLD_W = 1600;
 const INTRO_MS = 1400;
 const DEPTH_STAGGER = 140;
 const MIN_PX = 2;
+const LABEL_H = 16;
 const DETAIL_PX = 90; // a file must be this big on screen before its classes/functions appear
 
 const LANG_COLOURS: Record<string, number> = { typescript: 0x3b82f6, tsx: 0x0ea5e9, javascript: 0xeab308, python: 0x22c55e };
@@ -42,7 +46,31 @@ function mix(a: number, b: number, t: number): number {
 
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits }: Props) {
+const EDGE_PX = 14; // a tile must be this big on screen to be an edge endpoint; otherwise aggregate to its folder
+const IDLE_EDGES = 200;
+const BUNDLE_BETA = 0.85;
+const isAncOrSelf = (a: string, b: string) => a === '' || a === b || b.startsWith(a + '/') || b.startsWith(a + '#');
+
+/** Hierarchical edge bundling: straighten control points by beta (as d3.curveBundle) then sample a clamped uniform cubic B-spline. */
+function bundle(pts: [number, number][], beta: number, steps = 6): [number, number][] {
+  const n = pts.length - 1, [x0, y0] = pts[0]!, [xn, yn] = pts[n]!;
+  const p = pts.map(([x, y], i) => [beta * x + (1 - beta) * (x0 + ((xn - x0) * i) / n), beta * y + (1 - beta) * (y0 + ((yn - y0) * i) / n)] as [number, number]);
+  const c = [p[0]!, p[0]!, ...p, p[n]!, p[n]!];
+  const out: [number, number][] = [];
+  for (let i = 0; i + 3 < c.length; i++) {
+    const [a, b, d, e] = [c[i]!, c[i + 1]!, c[i + 2]!, c[i + 3]!];
+    for (let k = i === 0 ? 0 : 1; k <= steps; k++) {
+      const t = k / steps, t2 = t * t, t3 = t2 * t;
+      const w0 = (1 - t) ** 3 / 6, w1 = (3 * t3 - 6 * t2 + 4) / 6, w2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6, w3 = t3 / 6;
+      out.push([w0 * a[0] + w1 * b[0] + w2 * d[0] + w3 * e[0], w0 * a[1] + w1 * b[1] + w2 * d[1] + w3 * e[1]]);
+    }
+  }
+  return out;
+}
+
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode }: Props) {
+  const edgeRef = useRef({ edges, edgeMode, v: 0 });
+  if (edgeRef.current.edges !== edges || edgeRef.current.edgeMode !== edgeMode) edgeRef.current = { edges, edgeMode, v: edgeRef.current.v + 1 };
   const pinRef = useRef({ pins, hits }); pinRef.current = { pins, hits };
   useEffect(() => { kick.current(); }, [pins, hits]);
   const paint = useRef({ cur: painter, prev: painter, t0: 0 });
@@ -123,6 +151,92 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
       // ---- rendering ----
       const g = new Graphics();
       app.stage.addChild(g);
+      // coupling filaments + particles, drawn in world space under a camera transform; additive for the neon look
+      const eg = new Graphics(), pg = new Graphics();
+      eg.blendMode = 'add'; pg.blendMode = 'add';
+      app.stage.addChild(eg, pg);
+      let hoverNode: RNode | null = null;
+      let edgeBuilt = { v: -1, k: 0, x: 0, y: 0, hover: null as RNode | null };
+      let camChangedAt = 0;
+      let introWas = true;
+      let flows: { pts: [number, number][]; cum: number[]; len: number; col: number }[] = [];
+
+      const visibleTile = (n: RNode): RNode | null => {
+        let pick: RNode | null = null;
+        for (const a of n.ancestors().reverse()) {
+          if ((a.x1 - a.x0) * cam.k < EDGE_PX || (a.y1 - a.y0) * cam.k < EDGE_PX) break;
+          pick = a;
+        }
+        return pick;
+      };
+      const buildEdges = () => {
+        const { edges, edgeMode, v } = edgeRef.current;
+        edgeBuilt = { v, k: cam.k, x: cam.x, y: cam.y, hover: hoverNode };
+        eg.clear(); flows = [];
+        if (!edges.length) return;
+        const agg = new Map<string, { a: RNode; b: RNode; w: number }>();
+        for (const e of edges) {
+          const fa = byId.get(e.a), fb = byId.get(e.b);
+          if (!fa || !fb) continue;
+          const a = visibleTile(fa), b = visibleTile(fb);
+          if (!a || !b || isAncOrSelf(a.data.id, b.data.id) || isAncOrSelf(b.data.id, a.data.id)) continue;
+          const k = `${a.data.id}\0${b.data.id}`;
+          const cur = agg.get(k);
+          if (cur) cur.w += e.w; else agg.set(k, { a, b, w: e.w });
+        }
+        const all = [...agg.values()].sort((x, y) => y.w - x.w);
+        const h = hoverNode?.data.id;
+        const touches = (n: RNode) => h != null && (isAncOrSelf(h, n.data.id) || isAncOrSelf(n.data.id, h));
+        const lit = h != null ? all.filter((e) => touches(e.a) || touches(e.b)).slice(0, 400) : [];
+        const litSet = new Set(lit);
+        const idle = all.slice(0, IDLE_EDGES).filter((e) => !litSet.has(e));
+        const maxW = all[0]?.w ?? 1;
+        const col = edgeMode === 'imports' ? 0x38bdf8 : 0xe879f9;
+        const px = 1 / cam.k;
+        const centre = (n: RNode): [number, number] => [(n.x0 + n.x1) / 2, (n.y0 + n.y1) / 2];
+        const curve = (e: { a: RNode; b: RNode }) => bundle(e.a.path(e.b).map(centre), BUNDLE_BETA);
+        const stroke = (pts: [number, number][], width: number, alpha: number, c: number) => {
+          eg.moveTo(pts[0]![0], pts[0]![1]);
+          for (let i = 1; i < pts.length; i++) eg.lineTo(pts[i]![0], pts[i]![1]);
+          eg.stroke({ width: width * px, color: c, alpha, cap: 'round', join: 'round' });
+        };
+        const dimF = h != null ? 0.25 : 1;
+        for (const e of idle) {
+          const t = Math.sqrt(e.w / maxW);
+          const pts = curve(e);
+          stroke(pts, 3, 0.03 * dimF, col);
+          stroke(pts, 1, (0.08 + 0.22 * t) * dimF, col);
+        }
+        for (const e of lit) {
+          const t = Math.sqrt(e.w / maxW);
+          const pts = curve(e);
+          const c = edgeMode === 'imports' && touches(e.b) && !touches(e.a) ? 0x34d399 : col; // incoming imports in green
+          stroke(pts, 7, 0.06, c);
+          stroke(pts, 3.5, 0.16, c);
+          stroke(pts, 1.4, 0.55 + 0.4 * t, mix(c, 0xffffff, 0.35));
+          const cum = [0];
+          for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1]! + Math.hypot(pts[i]![0] - pts[i - 1]![0], pts[i]![1] - pts[i - 1]![1]));
+          flows.push({ pts, cum, len: cum[cum.length - 1]!, col: c });
+        }
+      };
+      const drawParticles = (now: number) => {
+        pg.clear();
+        if (!flows.length) return;
+        const px = 1 / cam.k;
+        for (const f of flows) {
+          const spacing = 60 * px, count = Math.max(1, Math.min(12, Math.floor(f.len / spacing)));
+          for (let i = 0; i < count; i++) {
+            const d = (((now / 1000) * 90 * px + (i * f.len) / count) % f.len + f.len) % f.len;
+            let j = 1;
+            while (j < f.cum.length - 1 && f.cum[j]! < d) j++;
+            const s0 = f.cum[j - 1]!, s1 = f.cum[j]!, t = s1 > s0 ? (d - s0) / (s1 - s0) : 0;
+            const [ax, ay] = f.pts[j - 1]!, [bx, by] = f.pts[j]!;
+            const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+            pg.circle(x, y, 3.2 * px).fill({ color: f.col, alpha: 0.18 });
+            pg.circle(x, y, 1.4 * px).fill({ color: 0xffffff, alpha: 0.85 });
+          }
+        }
+      };
       const labelPool: HTMLDivElement[] = [];
       const pinPool: HTMLDivElement[] = [];
 
@@ -141,12 +255,24 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         const fading = fadeT < 1;
         const introT = (now - t0) / (INTRO_MS + maxDepth * DEPTH_STAGGER);
         const intro = introT < 1;
+        // edges: follow the camera via transform; rebuild geometry on data/hover change or once the camera settles
+        eg.visible = pg.visible = !intro;
+        eg.scale.set(cam.k); eg.position.set(-cam.x * cam.k, -cam.y * cam.k);
+        pg.scale.set(cam.k); pg.position.set(-cam.x * cam.k, -cam.y * cam.k);
+        if (!intro) {
+          const camMoved = edgeBuilt.k !== cam.k || edgeBuilt.x !== cam.x || edgeBuilt.y !== cam.y;
+          if (camMoved && !camChangedAt) camChangedAt = now;
+          if (edgeBuilt.v !== edgeRef.current.v || edgeBuilt.hover !== hoverNode || (camMoved && !anim && now - camChangedAt > 120)) { buildEdges(); camChangedAt = 0; }
+          drawParticles(now);
+        }
+        if (introWas && !intro) { introWas = false; dirty = true; } // final frame after the intro: draw labels/pins
         if (!dirty && !intro && !fading) return;
         dirty = false;
 
         g.clear();
         const W = app.screen.width, H = app.screen.height;
         let li = 0, pi = 0;
+        const cands: { x: number; y: number; maxW: number; area: number; folder: boolean; dim: boolean; text: string }[] = [];
         if (hitsSeen !== pinRef.current.hits) { hitsSeen = pinRef.current.hits; sumHits(); }
         const { pins } = pinRef.current;
         const ZERO: HitCounts = { llm: 0, sql: 0 };
@@ -203,16 +329,10 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             g.rect(x0 + 0.5, y0 + 0.5, w - 1, h - 1).stroke({ width: 1.5, color: 0xfffbeb, alpha: 0.8 * alpha * (fading ? fadeT : 1) });
           }
           // labels
-          if (!intro && w > 44 && h > 16 && li < 400) {
-            let lab = labelPool[li];
-            if (!lab) { lab = document.createElement('div'); labelPool.push(lab); labelsEl.appendChild(lab); }
-            li++;
-            lab.className = 'tile-label' + (d.kind === 'folder' ? ' folder' : '');
-            lab.textContent = d.kind === 'file' && w > 140 && h > 34 ? `${d.name}  ${d.sloc}` : d.name;
-            lab.style.display = 'block';
-            lab.style.transform = `translate(${Math.max(0, x0)}px, ${Math.max(0, y0)}px)`;
-            lab.style.maxWidth = `${w}px`;
-            lab.style.opacity = dim ? '0.55' : '1';
+          if (!intro && w > 44 && h > 16 && cands.length < 3000) {
+            const lx = Math.max(0, x0), ly = Math.max(0, y0);
+            const maxW = x0 + w - lx, maxH = y0 + h - ly;
+            if (maxW > 30 && maxH >= LABEL_H) cands.push({ x: lx, y: ly, maxW, area: w * h, folder: d.kind === 'folder', dim, text: d.kind === 'file' && w > 140 && h > 34 ? `${d.name}  ${d.sloc}` : d.name });
           }
 
           const covered = { llm: 0, sql: 0 };
@@ -230,6 +350,25 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           return covered;
         };
         visit(laid);
+        // labels: larger tiles first; skip any label that would collide with one already placed
+        cands.sort((a, b) => b.area - a.area);
+        const placed: [number, number, number, number][] = [];
+        for (const c of cands) {
+          if (li >= 400) break;
+          const lw = Math.min(c.maxW, c.text.length * (c.folder ? 6.6 : 6.8) + 8);
+          const r: [number, number, number, number] = [c.x, c.y, c.x + lw, c.y + LABEL_H];
+          if (placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1])) continue;
+          placed.push(r);
+          let lab = labelPool[li];
+          if (!lab) { lab = document.createElement('div'); labelPool.push(lab); labelsEl.appendChild(lab); }
+          li++;
+          lab.className = 'tile-label' + (c.folder ? ' folder' : '');
+          lab.textContent = c.text;
+          lab.style.display = 'block';
+          lab.style.transform = `translate(${c.x}px, ${c.y}px)`;
+          lab.style.maxWidth = `${c.maxW}px`;
+          lab.style.opacity = c.dim ? '0.55' : '1';
+        }
         for (let i = li; i < labelPool.length; i++) labelPool[i]!.style.display = 'none';
         for (let i = pi; i < pinPool.length; i++) pinPool[i]!.style.display = 'none';
       };
@@ -268,7 +407,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         if (!drag) {
           const r = canvas.getBoundingClientRect();
           const sx = e.clientX - r.left, sy = e.clientY - r.top;
-          if (sx < 0 || sy < 0 || sx > r.width || sy > r.height || e.target !== canvas) { hoverCb.current(null); return; }
+          if (sx < 0 || sy < 0 || sx > r.width || sy > r.height || e.target !== canvas) { hoverNode = null; hoverCb.current(null); return; }
           const w = toWorld(sx, sy);
           // deepest node that is actually drawn (respect semantic zoom)
           const path = hit(w.x, w.y);
@@ -279,6 +418,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             pick = n;
             if (n.data.kind === 'file' && (pw < DETAIL_PX || ph < DETAIL_PX * 0.6)) break;
           }
+          hoverNode = pick === laid ? null : pick;
           hoverCb.current({ node: pick.data, x: e.clientX, y: e.clientY });
           return;
         }

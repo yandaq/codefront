@@ -29,13 +29,13 @@ function b(p: boolean, q: boolean, r: boolean) {
 const c = (x: number) => x ? 1 : 2; // +1
 function d(x: number) {
   switch (x) { case 1: break; }  // +1
-  while (x) { const f = () => (x ? 1 : 0); } // while +1, ternary inside nested fn: +1 + nesting 2 = 3
+  while (x) { const f = () => (x ? 1 : 0); } // while +1; named inner arrow f scored separately (1)
 }`, 'typescript');
     expect(r.flat).toBe(0);
     expect(r.a).toBe(8);
     expect(r.b).toBe(4);
     expect(r.c).toBe(1);
-    expect(r.d).toBe(5);
+    expect(r.d).toBe(2);
   });
 
   it('Python: if/elif/else, loops, except, boolean ops, conditional expression', async () => {

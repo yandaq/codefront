@@ -1,4 +1,5 @@
 import { CHURN_WINDOWS, type ChurnWindow } from '@grim-repo/schema';
+import type { CouplingOptions } from './coupling';
 import { LAYERS, legendGradient, type CxOptions, type LayerId } from './layers';
 
 export interface PinState { llm: boolean; sql: boolean }
@@ -13,6 +14,7 @@ interface Props {
   coverageAvailable: boolean;
   pins: PinState; setPins: (p: PinState) => void;
   hitTotals: { llm: number; sql: number };
+  coupling: CouplingOptions; setCoupling: (c: CouplingOptions) => void; couplingAvailable: boolean;
 }
 
 function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
@@ -44,7 +46,7 @@ const LEGEND: Record<Exclude<LayerId, 'type'>, [string, string, string]> = {
   coverage: ['0%', 'lines covered', '100%'],
 };
 
-export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, loading, cx, setCx, coverageAvailable, pins, setPins, hitTotals }: Props) {
+export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, loading, cx, setCx, coverageAvailable, pins, setPins, hitTotals, coupling, setCoupling, couplingAvailable }: Props) {
   const needsGit = LAYERS.find((l) => l.id === layer)?.git;
   return (
     <div className="glass pointer-events-auto absolute bottom-3 right-3 w-64 rounded-xl p-3 font-mono text-xs">
@@ -106,6 +108,23 @@ export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, lo
           </button>
         ))}
       </div>
+      <div className="mb-1 mt-3 text-[10px] uppercase tracking-[0.2em] text-cyan-300/80">Edges</div>
+      <button onClick={() => setCoupling({ ...coupling, on: !coupling.on })} disabled={!couplingAvailable}
+        className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left ${coupling.on ? 'border-slate-500/50 bg-slate-700/30 text-slate-100' : 'border-transparent text-slate-400 hover:bg-slate-800/50'}`}>
+        <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-sm border border-slate-500 ${coupling.on ? 'bg-sky-300 shadow-[0_0_8px_#38bdf8]' : ''}`} />Coupling</span>
+        {!couplingAvailable && <span className="text-[10px] text-slate-500">no data</span>}
+      </button>
+      {coupling.on && (
+        <>
+          <Seg value={coupling.mode} options={[['imports', 'Imports'], ['cochange', 'Co-change']]} onChange={(mode) => setCoupling({ ...coupling, mode })} />
+          {coupling.mode === 'cochange' && (
+            <div className="mt-2 flex flex-col gap-1 text-[11px] text-slate-400">
+              <label className="flex items-center gap-2">≥<input type="range" min={0} max={100} step={5} value={coupling.minConf} onChange={(e) => setCoupling({ ...coupling, minConf: Number(e.target.value) })} className="flex-1 accent-fuchsia-400" /><span className="w-9 text-right text-slate-200">{coupling.minConf}%</span></label>
+              <label className="flex items-center justify-between">min commits<input type="number" min={2} value={coupling.minCommits} onChange={(e) => setCoupling({ ...coupling, minCommits: Math.max(2, Number(e.target.value) || 2) })} className="w-14 rounded border border-slate-700 bg-slate-950/60 px-1 text-right text-slate-200" /></label>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

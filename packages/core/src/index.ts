@@ -7,6 +7,8 @@ import { buildFileChildren } from './build.js';
 import { readHistory, applyHistory } from './git.js';
 import { detectSource, detectFile, isPromptFile } from './detect.js';
 import { ingestCoverage } from './coverage.js';
+import { ImportResolver, importEdges, coChange } from './coupling.js';
+import type { ImportRef } from './parse.js';
 
 export { readHistory, applyHistory, blameTree, blameLines, functionAges, renameTarget, isGitRepo } from './git.js';
 
@@ -16,6 +18,7 @@ export { parseSource, languageFor } from './parse.js';
 export { cognitiveComplexity } from './complexity.js';
 export * from './detect.js';
 export * from './coverage.js';
+export * from './coupling.js';
 
 export interface ScanOptions { showDocs?: boolean; coverageReport?: string; onProgress?: (p: ScanProgress) => void }
 
@@ -38,6 +41,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
   };
   let parsed = 0, done = 0;
   const hits: Hit[] = [];
+  const importsByFile = new Map<string, ImportRef[]>();
   for (const f of files) {
     done++;
     const text = await readTextFile(f.abs).catch(() => null);
@@ -47,6 +51,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
     if (lang) {
       try {
         const r = await parseSource(text, lang);
+        if (r.imports.length) importsByFile.set(f.rel, r.imports);
         hits.push(...detectSource({ file: f.rel, lang: lang === 'python' ? 'py' : 'js', strings: r.strings, calls: r.calls }));
         const lines = codeLines(text, r.comments);
         const children = buildFileChildren(f.rel, lines, r.items, lang);
@@ -88,8 +93,19 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
   applyHistory(rootNode, hist);
   opts.onProgress?.({ stage: 'git', done: hist.commits.length, total: hist.commits.length });
   let fileCount = 0;
-  const count = (n: TreeNode) => { if (n.kind === 'file') fileCount++; else n.children?.forEach(count); };
+  const kept: string[] = [];
+  const count = (n: TreeNode) => { if (n.kind === 'file') { fileCount++; kept.push(n.path); } else n.children?.forEach(count); };
   count(rootNode);
+  const keptSet = new Set(kept);
+  const { edges, unresolved } = importEdges(new ImportResolver(root, files.map((f) => f.rel)), importsByFile);
+  const cc = coChange(hist.files, keptSet);
+  const ix = new Map<string, number>();
+  const id = (p: string) => { let i = ix.get(p); if (i == null) ix.set(p, (i = ix.size)); return i; };
+  const coupling = {
+    imports: edges.filter(([a, b]) => keptSet.has(a) && keptSet.has(b)).map(([a, b, w]) => [id(a), id(b), w] as [number, number, number]),
+    cochange: cc.map(([a, b, n, c]) => [id(a), id(b), n, c] as [number, number, number, number]),
+    unresolved,
+  };
   opts.onProgress?.({ stage: 'done', done: files.length, total: files.length });
   return {
     version: 1, createdAt: new Date().toISOString(), source: { type: 'local', path: root },
@@ -98,6 +114,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
     git: { available: hist.available, commits: hist.commits, head: hist.head },
     coverage,
     hits,
+    coupling: { files: [...ix.keys()], ...coupling },
   };
 }
 

@@ -91,6 +91,19 @@ export function decodeRanges(r: string): number[] {
   return out;
 }
 
+/**
+ * Coupling data. `files` is a path table; edges reference it by index.
+ * imports: directed [from, to, importStatements]; cochange: [a, b, sharedCommits, confidence 0..1] (shared ≥ 2, bulk commits > 50 files skipped).
+ */
+export const CouplingSchema = z.object({
+  files: z.array(z.string()),
+  imports: z.array(z.tuple([z.number().int(), z.number().int(), z.number().int()])),
+  cochange: z.array(z.tuple([z.number().int(), z.number().int(), z.number().int(), z.number()])),
+  /** Unresolved / external import statements per file path. */
+  unresolved: z.record(z.number().int()),
+});
+export type Coupling = z.infer<typeof CouplingSchema>;
+
 export const SnapshotSchema = z.object({
   version: z.literal(1),
   createdAt: z.string(),
@@ -101,6 +114,7 @@ export const SnapshotSchema = z.object({
   git: z.object({ available: z.boolean(), commits: z.array(z.number()), head: z.string().optional() }).optional(),
   coverage: CoverageSchema.optional(),
   hits: z.array(HitSchema).optional(),
+  coupling: CouplingSchema.optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 
