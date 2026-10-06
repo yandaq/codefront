@@ -51,6 +51,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [peek, setPeek] = useState<PeekReq | null>(null);
   const [palette, setPalette] = useState(false);
+  const [exploded, setExploded] = useState(() => { try { return localStorage.getItem('grim.exploded') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('grim.exploded', exploded ? '1' : '0'); } catch { /* storage blocked */ } }, [exploded]);
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
   const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
@@ -61,11 +63,16 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); }
+      else if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey && !palette) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+        e.preventDefault(); setExploded((x) => !x);
+      }
       else if (e.key === 'Escape' && peek) { e.preventDefault(); setPeek(null); }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [peek]);
+  }, [peek, palette]);
 
   const run = async (p: string, o: { ref?: string; fetch?: boolean; rescan?: boolean } = {}) => {
     if (!p) return;
@@ -159,7 +166,7 @@ export function App() {
 
   return (
     <div className="relative h-full w-full font-sans">
-      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} />}
+      {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} />}
       {snap && <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
         cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals}
         coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />}
@@ -223,6 +230,7 @@ export function App() {
           </form>
         )}
         {crumbs.length > 0 && (
+          <div className="flex items-center gap-2">
           <nav data-focus={crumbs[crumbs.length - 1]?.id} className="glass pointer-events-auto flex w-fit items-center gap-1 rounded-lg px-3 py-1.5 font-mono text-xs">
             {crumbs.map((c, i) => (
               <span key={c.id + i} className="flex items-center gap-1">
@@ -231,6 +239,11 @@ export function App() {
               </span>
             ))}
           </nav>
+          <button type="button" data-explode-toggle title="Exploded view: wider gaps between folders and files (Tab)" onClick={() => setExploded((x) => !x)}
+            className={`glass pointer-events-auto rounded-lg px-2.5 py-1.5 font-mono text-xs ${exploded ? 'text-cyan-200 ring-1 ring-cyan-400/40' : 'text-slate-400 hover:text-cyan-300'}`}>
+            {exploded ? 'Exploded · Tab' : '⊞ Explode · Tab'}
+          </button>
+          </div>
         )}
       </div>
       {!snap && !loading && (

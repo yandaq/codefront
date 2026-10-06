@@ -17,6 +17,8 @@ interface Props {
   pins: PinState;
   hits: Map<string, HitCounts>;
   edges: Edge[];
+  /** Tab-toggled exploded view: much wider gaps between tiles (folders more than files). */
+  exploded?: boolean;
   edgeMode: 'imports' | 'cochange';
   selectedId: string | null;
   onSelect: (n: TreeNode | null) => void;
@@ -76,7 +78,8 @@ function bundle(pts: [number, number][], beta: number, steps = 6): [number, numb
   return out;
 }
 
-export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect }: Props) {
+export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHover, pins, hits, edges, edgeMode, selectedId, onSelect, exploded = false }: Props) {
+  const explodeRef = useRef(exploded); explodeRef.current = exploded;
   const selRef = useRef(selectedId); selRef.current = selectedId;
   const selectCb = useRef(onSelect); selectCb.current = onSelect;
   useEffect(() => { kick.current(); }, [selectedId]);
@@ -95,7 +98,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
     kick.current();
   }, [painter]);
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<{ focusId: (id: string) => void; load: (s: Snapshot) => void } | null>(null);
+  const api = useRef<{ focusId: (id: string) => void; load: (s: Snapshot) => void; relayout: () => void } | null>(null);
   const snapRef = useRef(snapshot);
   // a new snapshot of the same repo (rescan / watch / progressive render) animates in place; a new repo replays the intro
   useEffect(() => { if (snapRef.current === snapshot) return; snapRef.current = snapshot; api.current?.load(snapshot); }, [snapshot]);
@@ -116,14 +119,21 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
 
       // ---- layout (world space) ----
       const worldH = WORLD_W * (el.clientHeight / Math.max(1, el.clientWidth));
+      // exploded view: folder gaps x6 (outer x5), file-internal gaps x1.5; capped to a fraction of the parent so small tiles survive
+      const cap = (d: RNode, p: number, f: number) => Math.min(p, Math.max(0.3, Math.min(d.x1 - d.x0, d.y1 - d.y0) * f));
+      const ex = (d: RNode, base: number, folderK: number, fileK: number) => {
+        if (!explodeRef.current) return base;
+        return d.data.kind === 'folder' ? cap(d, base * folderK, 0.1) : cap(d, base * fileK, 0.04);
+      };
+      const side = (d: RNode) => ex(d, Math.max(0.3, 3 * Math.pow(0.62, d.depth)), 5, 1);
       const layout = (s: Snapshot): RNode => treemap<TreeNode>()
         .tile(treemapSquarify.ratio(1.2))
         .size([WORLD_W, worldH])
-        .paddingTop((d) => (d.data.kind === 'folder' ? Math.max(1.5, 18 * Math.pow(0.62, d.depth)) : Math.max(0.4, 6 * Math.pow(0.6, d.depth))))
-        .paddingRight((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
-        .paddingBottom((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
-        .paddingLeft((d) => Math.max(0.3, 3 * Math.pow(0.62, d.depth)))
-        .paddingInner((d) => Math.max(0.3, 2 * Math.pow(0.62, d.depth)))(
+        .paddingTop((d) => (d.data.kind === 'folder' ? Math.max(Math.max(1.5, 18 * Math.pow(0.62, d.depth)), side(d)) : Math.max(0.4, 6 * Math.pow(0.6, d.depth))))
+        .paddingRight(side)
+        .paddingBottom(side)
+        .paddingLeft(side)
+        .paddingInner((d) => ex(d, Math.max(0.3, 2 * Math.pow(0.62, d.depth)), 6, 1.5))(
           hierarchy(s.root, (d) => d.children).sum((d) => (d.children?.length ? 0 : d.sloc)).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)));
       let laid = layout(snapRef.current);
       let byId = new Map<string, RNode>();
@@ -187,7 +197,20 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         if (changed.size) { if (pulse && now - pulse.t0 < PULSE_MS) pulse.changed.forEach((id) => changed.add(id)); pulse = { t0: now, changed }; }
         focus = byId.get(focus.data.id) ?? laid;
       };
-      api.current = { focusId: (id) => { const n = byId.get(id); if (n) flyTo(n); }, load };
+      /** Re-lay out the current snapshot (explode toggle): tween tiles via the diff path and re-fit the camera to the focus. */
+      const relayout = () => {
+        const prev = new Map<string, Rect>();
+        laid.each((n) => prev.set(n.data.id, [n.x0, n.y0, n.x1, n.y1]));
+        laid = layout(snapRef.current); index(); subHits.clear(); sumHits();
+        edgeBuilt.v = -1; hoverNode = null; dirty = true;
+        diff = { t0: performance.now(), prev, removed: [] };
+        focus = byId.get(focus.data.id) ?? laid;
+        anim = { from: { ...cam }, to: fit(focus), t0: performance.now(), dur: DIFF_MS };
+        el.dataset.exploded = explodeRef.current ? '1' : '0';
+      };
+      el.dataset.exploded = explodeRef.current ? '1' : '0';
+      (el as HTMLElement & { __rect?: (id: string) => Rect | null }).__rect = (id) => { const n = byId.get(id); return n ? [n.x0, n.y0, n.x1, n.y1] : null; }; // test hook
+      api.current = { focusId: (id) => { const n = byId.get(id); if (n) flyTo(n); }, load, relayout };
 
       // ---- rendering ----
       const g = new Graphics();
@@ -571,7 +594,8 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
     };
   }, []);
 
+  useEffect(() => { if (host.current && host.current.dataset.exploded !== (exploded ? '1' : '0')) api.current?.relayout(); }, [exploded]);
   useEffect(() => { if (focusRequest) api.current?.focusId(focusRequest.id); }, [focusRequest]);
 
-  return <div ref={host} className="absolute inset-0" />;
+  return <div ref={host} data-treemap className="absolute inset-0" />;
 }

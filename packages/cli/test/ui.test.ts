@@ -49,6 +49,24 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       await expect.poll(() => p2.evaluate(() => document.querySelector<HTMLElement>('[data-focus]')?.dataset.focus)).toBe('deep/a/b/c/deep.ts');
       await p2.waitForTimeout(1000);
       expect(await p2.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0))).toBeGreaterThan(0);
+      // Tab toggles the exploded view: data-exploded flips and the gap between sibling folders grows
+      const p3 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await p3.goto(url);
+      await p3.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
+      const gap = () => p3.evaluate(() => {
+        const r = (document.querySelector('[data-treemap]') as HTMLElement & { __rect: (id: string) => number[] }).__rect;
+        const a = r('src'), b = r('deep');
+        return Math.max(a[0]! - b[2]!, b[0]! - a[2]!, a[1]! - b[3]!, b[1]! - a[3]!);
+      });
+      const exploded = () => p3.evaluate(() => document.querySelector<HTMLElement>('[data-treemap]')?.dataset.exploded);
+      expect(await exploded()).toBe('0');
+      const g0 = await gap();
+      await p3.locator('body').click({ position: { x: 5, y: 790 } }).catch(() => {});
+      await p3.keyboard.press('Tab');
+      await expect.poll(exploded).toBe('1');
+      expect(await gap()).toBeGreaterThan(g0 * 2);
+      await p3.keyboard.press('Tab');
+      await expect.poll(exploded).toBe('0');
     } finally {
       await browser.close();
       srv.kill();

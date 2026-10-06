@@ -51,4 +51,4 @@ pnpm test                          # Vitest (packages/core)
 - `cli` – `grim-repo [path|url]`, `grim-repo scan`; publishable bundle
 
 ## Controls
-Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump.
+Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump, Tab to toggle the exploded view (wider gaps between folders and files).

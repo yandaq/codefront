@@ -77,6 +77,7 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Code peek: Shiki-highlighted source (theme matching UI), scrolled to function, coverage gutters when available.
 - Open in editor: `vscode://file/...` (configurable: Cursor, JetBrains, …); remote repos link to host line URL.
 - `⌘K` fuzzy search over files/functions; camera flies to result.
+- `Tab` toggles an exploded view (much wider gaps; folders separate more than files), animated in place and remembered per browser.
 
 ## 8. Visual design — "Mission Control"
 - Dark hero theme (light toggle available). Background `#0a0e17`.
