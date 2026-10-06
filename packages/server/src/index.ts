@@ -34,14 +34,15 @@ export async function startServer(opts: ServerOptions = {}) {
   const blaming = new Map<string, Record<string, number>>(); // root -> ages delivered so far
   const snaps = new Map<string, Snapshot>(); // work-tree root -> full (non-lite) snapshot
   const targets = new Map<string, { input: string; req: ScanRequest; target: ResolvedTarget }>();
-  const watchers = new Map<string, FSWatcher>();
+  type WatchState = { watcher?: FSWatcher; ready: Promise<void>; stopped: boolean; scanTimer?: NodeJS.Timeout; restartTimer?: NodeJS.Timeout };
+  const watchers = new Map<string, WatchState>();
   const inflight = new Map<string, Promise<Snapshot>>();
 
   const transport = (s: Snapshot) => (s.stats.files > liteFiles ? liteSnapshot(s) : s);
 
   const doScan = async (req: ScanRequest): Promise<Snapshot> => {
     const input = isGitUrl(req.path) ? req.path : path.resolve(req.path);
-    const key = `${input}|${req.ref ?? ''}`;
+    const key = `${input}|${req.ref ?? ''}|docs:${req.showDocs !== false}`;
     // coalesce concurrent scans of the same target
     const prev = inflight.get(key);
     if (prev) await prev.catch(() => {});
@@ -89,14 +90,18 @@ export async function startServer(opts: ServerOptions = {}) {
     const p = req.query.path ?? opts.defaultPath;
     if (!p) return reply.code(400).send({ error: 'path required' });
     if (!validTarget(p)) return reply.code(404).send({ error: `Path not found: ${p}` });
-    try { return transport(await doScan({ path: p, showDocs: req.query.showDocs === 'true', coverageReport: req.query.coverageReport, ref: req.query.ref })); }
+    const showDocs = req.query.showDocs == null ? undefined : req.query.showDocs === 'true';
+    try { return transport(await doScan({ path: p, showDocs, coverageReport: req.query.coverageReport, ref: req.query.ref })); }
     catch (e) { return reply.code(500).send(fail(e)); }
   });
   // Instant reopen: last persisted snapshot for a target (no clone/scan); 404 if none.
-  app.get<{ Querystring: { path?: string } }>('/api/cached', async (req, reply) => {
+  app.get<{ Querystring: { path?: string; showDocs?: string } }>('/api/cached', async (req, reply) => {
     const p = req.query.path;
     if (!p) return reply.code(400).send({ error: 'path required' });
     const id = isGitUrl(p) ? parseGitUrl(p).id : localRepoId(p);
+    // Only the default docs-visible snapshot is persisted. A docs-hidden request must scan
+    // rather than briefly displaying an incompatible cached map.
+    if (req.query.showDocs === 'false') return reply.code(404).send({ error: 'no compatible cache' });
     const s = await (await RepoCache.open(id)).loadSnapshot();
     if (!s || (!isGitUrl(p) && !existsSync(s.source.path))) return reply.code(404).send({ error: 'no cache' });
     if (!snaps.has(s.source.path)) snaps.set(s.source.path, s); // allows code peek before the refresh lands
@@ -123,33 +128,107 @@ export async function startServer(opts: ServerOptions = {}) {
     return { ok: true };
   });
   // Watch mode (local repos only): chokidar → debounced incremental rescan, pushed as snapshot updates.
-  app.post<{ Body: { root?: string; on?: boolean } }>('/api/watch', async (req, reply) => {
+  app.post<{ Body: { root?: string; on?: boolean; showDocs?: boolean } }>('/api/watch', async (req, reply) => {
     const root = path.resolve(req.body?.root ?? '');
     const t = targets.get(root);
     if (!t) return reply.code(404).send({ error: 'scan first' });
     if (t.target.remote) return reply.code(400).send({ error: 'watch mode is for local repos only' });
+    if (req.body?.showDocs != null) t.req = { ...t.req, showDocs: req.body.showDocs };
     const existing = watchers.get(root);
-    if (!req.body?.on) { await existing?.close(); watchers.delete(root); return { watching: false }; }
-    if (existing) return { watching: true };
-    const ignored = await ignoreFilter(root);
+    const stop = async (state: WatchState) => {
+      state.stopped = true;
+      if (state.scanTimer) clearTimeout(state.scanTimer);
+      if (state.restartTimer) clearTimeout(state.restartTimer);
+      await state.watcher?.close();
+    };
+    if (!req.body?.on) { if (existing) await stop(existing); watchers.delete(root); return { watching: false }; }
+    if (existing) {
+      try { await existing.ready; return { watching: true }; }
+      catch (e) {
+        if (watchers.get(root) === existing) watchers.delete(root);
+        await stop(existing);
+        return reply.code(500).send(fail(e));
+      }
+    }
     // Work tree (minus ignored paths and .git internals), plus the bits of .git that change the uncommitted set
     // without touching files: HEAD (checkout), index (add / commit) and refs (commit / reset).
     const gitDir = await new Promise<string>((res) => execFile('git', ['rev-parse', '--absolute-git-dir'], { cwd: root }, (e, out) => res(e ? path.join(root, '.git') : out.trim())));
     const gitPaths = existsSync(gitDir) ? ['HEAD', 'index', 'refs', 'packed-refs'].map((f) => path.join(gitDir, f)) : [];
-    const w = chokidarWatch([root, ...gitPaths], {
-      ignored: (p: string) => { if (p === gitDir || p.startsWith(gitDir + path.sep)) return !gitPaths.some((g) => p === g || p.startsWith(g + path.sep)) && p !== gitDir; return ignored(p); },
-      ignoreInitial: true, awaitWriteFinish: false,
-    });
-    let timer: NodeJS.Timeout | null = null;
-    w.on('all', () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async () => {
-        timer = null;
-        try { const s = await doScan(t.req); send({ type: 'snapshot', root: t.input, snapshot: transport(s) }); } catch (e) { log(`watch rescan failed: ${fail(e).error}`); }
-      }, 500);
-    });
-    watchers.set(root, w);
-    return { watching: true };
+    const state: WatchState = { ready: Promise.resolve(), stopped: false };
+    const rescan = async () => {
+      if (state.stopped || watchers.get(root) !== state) return;
+      const latest = targets.get(root);
+      if (!latest) return;
+      try { const s = await doScan(latest.req); send({ type: 'snapshot', root: latest.input, snapshot: transport(s) }); }
+      catch (e) { log(`watch rescan failed: ${fail(e).error}`); throw e; }
+    };
+    const start = async (): Promise<void> => {
+      const ignored = await ignoreFilter(root);
+      if (state.stopped) return;
+      const w = chokidarWatch([root, ...gitPaths], {
+        // Ignore files themselves must remain observable so changed rules can rebuild the watcher.
+        ignored: (p: string) => {
+          if (p === gitDir || p.startsWith(gitDir + path.sep)) return !gitPaths.some((g) => p === g || p.startsWith(g + path.sep)) && p !== gitDir;
+          if (['.gitignore', '.gitattributes'].includes(path.basename(p))) return false;
+          return ignored(p);
+        },
+        ignoreInitial: true, awaitWriteFinish: false,
+      });
+      state.watcher = w;
+      let settled = false;
+      const ready = new Promise<void>((resolve, reject) => {
+        w.once('ready', async () => {
+          try {
+            // Reconcile after Chokidar's initial crawl. Files created while ignoreInitial was
+            // suppressing startup events are therefore still included in the pushed snapshot.
+            await rescan();
+            settled = true;
+            resolve();
+          } catch (e) { settled = true; reject(e); }
+        });
+        w.on('error', (e) => {
+          log(`watch error: ${fail(e).error}`);
+          if (!settled) { settled = true; reject(e); }
+        });
+      });
+      state.ready = ready;
+      w.on('all', (_event, changedPath) => {
+        if (state.stopped || state.watcher !== w) return;
+        const configChanged = ['.gitignore', '.gitattributes'].includes(path.basename(changedPath));
+        if (configChanged) {
+          if (state.scanTimer) { clearTimeout(state.scanTimer); state.scanTimer = undefined; }
+          if (state.restartTimer) clearTimeout(state.restartTimer);
+          state.restartTimer = setTimeout(async () => {
+            state.restartTimer = undefined;
+            if (state.stopped || state.watcher !== w) return;
+            await w.close();
+            try { await start(); }
+            catch (e) {
+              log(`watch restart failed: ${fail(e).error}`);
+              if (watchers.get(root) === state) watchers.delete(root);
+              await stop(state);
+            }
+          }, 500);
+          return;
+        }
+        if (state.scanTimer) clearTimeout(state.scanTimer);
+        state.scanTimer = setTimeout(async () => {
+          state.scanTimer = undefined;
+          try { await rescan(); } catch { /* rescan logs the actionable error */ }
+        }, 500);
+      });
+      await ready;
+    };
+    watchers.set(root, state);
+    try {
+      state.ready = start();
+      await state.ready;
+      return { watching: true };
+    } catch (e) {
+      if (watchers.get(root) === state) watchers.delete(root);
+      await stop(state);
+      return reply.code(500).send(fail(e));
+    }
   });
   // Code peek: only files present in the snapshot of that root, never outside it.
   const filesOf = (abs: string) => {
@@ -204,6 +283,7 @@ export async function startServer(opts: ServerOptions = {}) {
     if (!t.s.git?.available) return { git: false, commits: [] };
     const branch = req.query.branch || 'HEAD';
     if (!refOk(branch)) return reply.code(400).send({ error: 'invalid branch' });
+    if (branch === 'HEAD' && !t.s.git?.head) return { git: true, commits: [] };
     try { return { git: true, commits: await listCommits(t.abs, branch, Number(req.query.offset) || 0, Number(req.query.limit) || 100) }; }
     catch (e) { return reply.code(400).send(fail(e)); }
   });
@@ -232,7 +312,14 @@ export async function startServer(opts: ServerOptions = {}) {
     await app.register(fastifyStatic, { root: webRoot });
     app.setNotFoundHandler((req, reply) => (req.url.startsWith('/api') ? reply.code(404).send({ error: 'not found' }) : reply.sendFile('index.html')));
   }
-  app.addHook('onClose', async () => { await Promise.all([...watchers.values()].map((w) => w.close())); });
+  app.addHook('onClose', async () => {
+    await Promise.all([...watchers.values()].map(async (state) => {
+      state.stopped = true;
+      if (state.scanTimer) clearTimeout(state.scanTimer);
+      if (state.restartTimer) clearTimeout(state.restartTimer);
+      await state.watcher?.close();
+    }));
+  });
 
   const address = await app.listen({ port: opts.port ?? 0, host: opts.host ?? '127.0.0.1' });
   return { app, address, close: () => app.close() };

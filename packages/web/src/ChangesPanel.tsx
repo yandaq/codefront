@@ -48,10 +48,12 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
   const loadBranches = useCallback((keep?: string) => fetch(`/api/git/branches?root=${encodeURIComponent(root)}`).then((r) => r.json()).then((b) => {
     const list: string[] = b.branches ?? [];
     setGit(!!b.git); setBranches(list); setRemotes(b.remotes ?? []);
-    const next: string = keep && list.includes(keep) ? keep : b.current ?? list[0] ?? 'HEAD';
+    setErr(null);
+    const next: string = keep && list.includes(keep) ? keep : b.current ?? list[0] ?? '';
     setBranch(next); return next;
   }), [root]);
   useEffect(() => {
+    setErr(null); setCommits([]); setSel(null); setDone(false);
     if (!snap.git?.available) { setGit(false); return; }
     loadBranches().catch(() => setGit(false));
   }, [root, snap.git?.available, loadBranches]);
@@ -90,7 +92,7 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
       setDone(b.commits.length < PAGE);
     } catch (e) { setErr(String((e as Error).message)); } finally { loadingMore.current = false; }
   }, [root, branch, commits.length, done]);
-  useEffect(() => { setSel(null); setCommits([]); setDone(false); if (branch) loadMore(true); }, [branch, root]);
+  useEffect(() => { setErr(null); setSel(null); setCommits([]); setDone(false); if (branch) loadMore(true); }, [branch, root]);
   // After a fetch: reload the first page, keeping the selected commit if it is still listed.
   const loadMoreReset = async (keepSha: string | null) => {
     const r = await fetch(`/api/commits?${new URLSearchParams({ root, branch, offset: '0', limit: String(PAGE) })}`);
@@ -141,11 +143,11 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
       {open && git && (
         <>
           <div className="mt-2 flex items-center gap-2">
-            <Tip id="changesBranch" block className="min-w-0 flex-1">
+            {branches.length > 0 && <Tip id="changesBranch" block className="min-w-0 flex-1">
               <select aria-label="changes branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="w-full rounded border border-cyan-400/20 bg-slate-950/60 px-2 py-1 text-slate-200">
                 {branches.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
-            </Tip>
+            </Tip>}
             {canFetch && <Tip id="changesFetch" className="shrink-0"><button data-git-fetch onClick={doFetch} disabled={!!fetching}
               className="flex items-center gap-1 whitespace-nowrap rounded border border-cyan-400/30 px-2 py-1 text-[11px] text-cyan-200 hover:border-cyan-300/60 disabled:opacity-60">
               <span className={fetching ? 'inline-block animate-spin' : ''}>⟳</span> Fetch</button></Tip>}
@@ -164,7 +166,7 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
           <Tip id="changesShowLocal" block className="mt-1">
             <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-slate-400"><input type="checkbox" data-show-local checked={showLocal} onChange={(e) => setShowLocal(e.target.checked)} className="accent-white" />Show local changes</label>
           </Tip>
-          <Tip id="changesCommits" block className="mt-2 flex min-h-[76px] shrink flex-col" >
+          {!branch ? <div data-no-commits className="mt-2 rounded border border-slate-700/60 bg-slate-950/40 p-2 text-slate-500">No commits yet</div> : <Tip id="changesCommits" block className="mt-2 flex min-h-[76px] shrink flex-col" >
             <div ref={listRef} data-commit-list onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="h-56 min-h-[76px] shrink overflow-y-auto rounded border border-slate-700/60 bg-slate-950/40">
               <div style={{ height: commits.length * ROW, position: 'relative' }}>
                 {commits.slice(first, last).map((c, k) => {
@@ -181,7 +183,7 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
               </div>
               {!commits.length && <div className="p-2 text-slate-500">{done ? 'No commits' : 'Loading…'}</div>}
             </div>
-          </Tip>
+          </Tip>}
           {!sel && !local && commits.length > 0 && <div className="mt-1 text-[10px] text-slate-500">click a commit · shift-click a second for a range</div>}
           {err && <div className="mt-1 text-rose-300">{err}</div>}
           {(sel || local) && (

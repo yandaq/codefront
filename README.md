@@ -1,58 +1,204 @@
 # grim-repo
 
-Local-first codebase treemap visualiser. See [docs/SPEC.md](docs/SPEC.md). Status: **M6 ops** (all v1 milestones).
+`grim-repo` is a local-first codebase explorer. Point it at a local directory or a Git URL and it builds an interactive treemap of folders, files, classes, and functions, with each tile sized by source lines of code (SLOC).
+
+The map can be coloured by code age, churn, hotspots, cognitive complexity, or test coverage. Independent overlays show imports, co-change relationships, LLM/SQL usage, selected commit ranges, and uncommitted work.
+
+The repository is a TypeScript/pnpm monorepo. The complete v1 design is documented in [docs/SPEC.md](docs/SPEC.md).
+
+## Highlights
+
+- Local paths and HTTPS, SSH, or SCP-style Git URLs, including GitHub/GitLab/Bitbucket branch URLs
+- Tree-sitter analysis for TypeScript/JavaScript, Python, Go, Java, C#, and Rust
+- Semantic zoom from folders down to classes and functions
+- Git age, churn, hotspot, contributor, commit, branch, and diff views
+- Cognitive-complexity and coverage layers; coverage reports are read, never generated
+- Import and co-change coupling overlays
+- Heuristic pins for LLM prompts/API calls and SQL/query-builder usage
+- Live watch mode for local repositories, including staged, unstaged, and untracked changes
+- Incremental, content-addressed scans with persisted snapshots and background worker parsing
+- Headless JSON output for other tools
+
+Repository code is scanned as data and is never executed.
 
 ## Requirements
-Node 20+, pnpm 9+.
 
-## Run
+- Node.js 20 or newer
+- pnpm 10 (the workspace currently pins `pnpm@10.7.0`)
+- Git on `PATH` for history features and remote repositories
+
+## Quick start
+
 ```sh
 pnpm install
-pnpm -r build
-node packages/cli/dist/index.js [path|git-url]   # starts server on a free port and opens the browser
-# options: --port=4317  --no-open  --verbose (log scan timings / cache hits)
-node packages/cli/dist/index.js scan <path|git-url> --out snapshot.json [--ref branch] [--no-cache]   # headless
+pnpm build
+pnpm start -- /path/to/repository
 ```
-Git URLs (https, ssh, GitHub/GitLab/Bitbucket web URLs incl. `/tree/<branch>`) are cloned blobless into
-`~/.grim-repo/repos/<id>`; per-file analysis, git history, blame and the last snapshot are cached in
-`~/.grim-repo/cache/<id>/` (override the root with `GRIM_REPO_HOME`). Auth: `gh auth token` (github.com) →
-git credential helper / SSH → PAT in the OS keychain (optional `keytar`). Repo code is never executed.
 
-Publishable package: `cd packages/cli && npm pack` → `npx ./grim-repo-0.1.0.tgz --no-open <path>` (server, core,
-schema bundled with esbuild; built web UI copied to `dist/web`).
+The CLI starts a server on a free loopback port and opens the UI in your browser. If no target is supplied, it scans the current directory.
 
-### Editor types
-Workspace packages export a `source` condition pointing at `src/index.ts`; each package's `tsconfig.json`
-(used by editors) sets `customConditions: ["source"]`, so types come from source without rebuilding.
-Builds use `tsconfig.build.json` (dist `.d.ts`).
+After building, the equivalent direct commands are:
 
-## Dev
 ```sh
-pnpm dev:server -- /path/to/repo   # API on http://127.0.0.1:4317 (rebuilds server first)
-pnpm dev:web                       # Vite on http://localhost:5173, proxies /api to 4317
-pnpm test                          # Vitest (packages/core)
+# Local repository
+node packages/cli/dist/index.js /path/to/repository
+
+# Remote repository
+node packages/cli/dist/index.js https://github.com/owner/repository
+
+# Do not open a browser; optionally choose a port
+node packages/cli/dist/index.js --no-open --port 4317 /path/to/repository
 ```
 
-## API
-- `POST /api/scan` `{ "path": "/abs/path", "showDocs": false }` → snapshot JSON (`packages/schema`)
-- `GET /api/scan?path=...` → same
-- `GET /api/config` → `{ defaultPath }`
-- `POST /api/scan` also takes `ref` (branch) and `fetch` (remote: fetch + reset first)
-- `GET /api/cached?path=` → last persisted snapshot (instant reopen) · `GET /api/branches?path=<url>`
-- `POST /api/watch` `{ root, on }` (local only; the UI turns it on by default and remembers if you turn it off). Uncommitted local changes ship in the snapshot as `uncommitted` and pulse white on the map · `GET /api/detail?root=&path=` (lazy file detail for >50k-file repos)
-- `POST /api/auth/pat` `{ host, token }` → OS keychain
-- `GET /api/git/branches?root=` · `GET /api/commits?root=&branch=&offset=&limit=` (sha, parents, subject, author, date, +/−) · `GET /api/diff?root=&from=&to=` (per-file A/M/D/R status, counts, `-U0` hunks, per-function attribution; `root` must be a scanned root, refs strictly validated)
-- `GET /api/git/remotes?root=` · `POST /api/git/fetch?root=` (local repos only: `git fetch --prune` per remote, fetch only, never touches the work tree, index, local branches or HEAD; hooks off, no prompts, M6 token injection for https, 120 s timeout; progress as the `fetch` stage; returns remotes plus added/updated/pruned remote-tracking refs)
-- `WS /api/progress` → stage events (clone, walk, sloc, git, parse, detect, coverage, blame), partial / watch snapshots, blame layer updates
+Use `--verbose` to print scan timings and cache hit/miss information from the server.
 
-## Packages
-- `schema` – zod snapshot schema / types
-- `core` – walker (.gitignore, exclusions), SLOC, tree-sitter (WASM, worker_threads pool) for TS/JS, Python, Go, Java, C#, Rust; git, cache, clone
-- `server` – Fastify API + static web
-- `web` – React + Vite + Tailwind + PixiJS v8 treemap
-- `cli` – `grim-repo [path|url]`, `grim-repo scan`; publishable bundle
+### Headless scan
 
-## Controls
-Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump, Tab to cycle the exploded view off → medium → large (Shift+Tab steps back): tiles keep their size and arrangement and drift apart like an exploded-view diagram, folders far more than files.
+```sh
+node packages/cli/dist/index.js scan /path/to/repository --out snapshot.json
+node packages/cli/dist/index.js scan https://github.com/owner/repository --ref main --out snapshot.json
+```
 
-**Changes panel** (above the layer dock): pick a branch, click a commit to see what it changed (vs its first parent), or shift-click a second commit for the inclusive range `older^..newer`. Changed files and functions get a white glow outline drawn over the current fill layer, which keeps working (stronger glow = more lines changed, log scale; added tiles have a double outline); folders with changes get only a faint border, and when zoomed in far enough to show functions the changed functions glow while their file gets a faint outline. The list shows changed files → functions with +/− (click to fly there) plus a "Not on map" section for deleted/renamed files. Clear (or Esc in the panel) removes the glows. For local repos with a remote, **⟳ Fetch** next to the branch selector runs `git fetch --all --prune` (your files and local branches are not changed), shows e.g. `origin: 3 updated, 1 new, 1 pruned`, and refreshes the branch list; remote-tracking branches (`origin/*`) can be selected to browse their commits.
+Headless scans write a portable snapshot matching the schema in `packages/schema`. The available options are:
+
+```text
+--out <file>   Output path (default: snapshot.json)
+--ref <name>   Remote branch to scan
+--no-cache     Ignore the per-file analysis cache
+--no-docs      Exclude documentation and configuration files
+```
+
+### Package smoke test
+
+The CLI package bundles the server, core scanner, schema, and built web UI:
+
+```sh
+cd packages/cli
+npm pack
+npx ./grim-repo-0.1.0.tgz --no-open /path/to/repository
+```
+
+## Using the UI
+
+- Scroll to zoom and drag to pan.
+- Single-click a tile to inspect its metrics, history, coupling, detections, and source actions.
+- Double-click a tile to dive into it. Right-click, Backspace, or Escape moves up; breadcrumbs jump directly to an ancestor.
+- Press `Ctrl+K` or `Cmd+K` to search files and functions.
+- Press Tab to cycle the exploded view through off, medium, and large; Shift+Tab cycles backwards.
+- Local repositories enable Watch by default. File edits and Git index/ref changes trigger a debounced incremental rescan.
+- Documentation and configuration files are included by default. The persistent Docs/config toolbar toggle hides or restores them and rescans immediately.
+
+Only one fill layer is active at a time:
+
+| Layer | Meaning |
+| --- | --- |
+| Type | Language/file type and code-node kind |
+| Age | Time since code was last touched; function-level values arrive from background blame |
+| Churn | Commits touching a node over 30 days, 90 days, one year, or all history |
+| Hotspots | Normalised churn multiplied by cognitive complexity |
+| Complexity | Cognitive complexity, shown as maximum or SLOC-weighted mean |
+| Coverage | Covered lines from an existing report; missing data is hatched |
+
+Pins for LLM and SQL detections and edges for imports or co-change can be enabled independently. Coupling edges can be filtered by confidence and shared commit count.
+
+The Changes panel lets you select a commit or Shift-click a second commit for an inclusive range. Changed files and functions receive a static white outline over the current fill layer. Local uncommitted changes use a separate pulsing outline and include staged, unstaged, and untracked files.
+
+For local repositories, Fetch updates remote-tracking refs with `git fetch --prune`; it does not modify the work tree, index, local branches, or `HEAD`. For a cloned remote, Rescan fetches and resets the managed clone to the selected remote branch.
+
+## Coverage reports
+
+grim-repo searches up to five directory levels for common report names and merges matching line data. Supported formats are:
+
+- LCOV (`lcov.info`)
+- Istanbul (`coverage-final.json`)
+- Cobertura/pytest-cov (`coverage.xml`, `cobertura.xml`, `cobertura-coverage.xml`)
+- JaCoCo (`jacoco.xml`)
+- Go cover profiles (`cover.out`, `coverage.out`)
+
+Tests are not run by grim-repo. Generate a report with your normal test command, then rescan.
+
+## Remote repositories and authentication
+
+Remote repositories are cloned with `--filter=blob:none` into the grim-repo data directory. Hooks are disabled, Git LFS smudging is skipped, interactive credential prompts are disabled, and repository code is not executed.
+
+Authentication is attempted through the normal SSH or Git credential setup. For HTTPS, grim-repo can also use:
+
+1. `gh auth token` for `github.com`
+2. A personal access token stored in the operating-system keychain through the optional `keytar` dependency
+
+Tokens injected by grim-repo are passed to Git in memory and are not written to repository configuration or logs.
+
+## Cache and scan behaviour
+
+By default, data is stored under `~/.grim-repo`:
+
+```text
+~/.grim-repo/
+├── repos/<repo-id>/   # managed blobless clones
+└── cache/<repo-id>/   # file analysis, history, blame, and latest snapshot
+```
+
+Set `GRIM_REPO_HOME` to move that directory. Set `GRIM_LITE_FILES` to change the large-repository threshold (default: 50,000 files); above it, sub-file detail is fetched lazily when a file is selected.
+
+Scans respect nested `.gitignore` files and generated/vendored paths marked in `.gitattributes`. Documentation and configuration files are included by default; pass `showDocs: false`, use the UI toggle, or use headless `--no-docs` to hide them. Common dependency, build, cache, and VCS directories plus lockfiles, binaries, minified/generated files, and files larger than 1 MB are always excluded. Prompt files are still checked by the detector when documentation is hidden.
+
+## Development
+
+Run the API and web app in separate terminals:
+
+```sh
+# Fastify API at http://127.0.0.1:4317
+pnpm dev:server -- /path/to/repository
+
+# Vite app at http://localhost:5173; /api is proxied to port 4317
+pnpm dev:web
+```
+
+Common workspace commands:
+
+```sh
+pnpm build       # build every package
+pnpm test        # run every package's Vitest suite
+pnpm start -- .  # run the built CLI against this repository
+```
+
+### Workspace layout
+
+| Package | Responsibility |
+| --- | --- |
+| `@grim-repo/schema` | Zod schemas, snapshot types, and shared metric helpers |
+| `@grim-repo/core` | Walking, parsing, SLOC, Git/history, cache, coverage, detectors, and coupling |
+| `@grim-repo/server` | Fastify HTTP/WebSocket API, static UI, watch mode, and safe source access |
+| `@grim-repo/web` | React/Vite UI and PixiJS treemap renderer |
+| `grim-repo` | Publishable CLI bundle and headless scanner |
+
+Workspace packages expose a `source` export condition so editors resolve types from `src/index.ts` without a rebuild. Production declaration files are emitted through each package's `tsconfig.build.json`.
+
+## HTTP and WebSocket API
+
+The server listens on `127.0.0.1` by default.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/scan` | Scan `{ path, showDocs?, coverageReport?, ref?, fetch? }` |
+| `GET` | `/api/scan?path=...` | Query-string form of a scan |
+| `GET` | `/api/cached?path=...&showDocs=...` | Return the compatible latest persisted snapshot without rescanning |
+| `GET` | `/api/config` | Return the default target and keychain availability |
+| `POST` | `/api/watch` | Enable or disable local watch mode with `{ root, on, showDocs? }` |
+| `GET` | `/api/detail?root=...&path=...` | Lazily return file internals for a large snapshot |
+| `GET` | `/api/file?root=...&path=...` | Read a file already present in the scanned snapshot |
+| `GET` | `/api/branches?path=...` | List branches in a managed remote clone |
+| `GET` | `/api/git/branches?root=...` | List branches for the Changes panel |
+| `GET` | `/api/commits?root=...&branch=...` | Return paginated commit metadata |
+| `GET` | `/api/diff?root=...&from=...&to=...` | Return file/function changes for a validated ref range |
+| `GET` | `/api/git/remotes?root=...` | List configured remotes |
+| `POST` | `/api/git/fetch?root=...` | Fetch and prune local-repository remote-tracking refs |
+| `POST` | `/api/auth/pat` | Store `{ host, token }` in the OS keychain |
+| `GET` | `/api/layers/age?path=...` | Retrieve blame-derived age values already computed |
+| `WS` | `/api/progress` | Stream scan progress, partial/watch snapshots, and age-layer updates |
+
+Snapshot responses conform to `SnapshotSchema` in `packages/schema/src/index.ts`.
+
+## License
+
+Licensed under the [MIT License](LICENSE).

@@ -2,3 +2,26 @@ node_modules
 dist
 *.tsbuildinfo
 .DS_Store
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+.npmrc
+.pypirc
+.netrc
+credentials.json
+secrets.json
+
+# Private keys and signing credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*

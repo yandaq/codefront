@@ -39,4 +39,14 @@ describe.skipIf(!node20)('changes API arg validation', () => {
     }
     expect((await get('/api/diff', { root: '/', from: 'main', to: 'main' })).status).toBe(404);
   });
+  it('returns an empty HEAD page for an unborn repository but still rejects unknown refs', async () => {
+    const unborn = mkdtempSync(path.join(tmpdir(), 'grim-api-unborn-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: unborn });
+    writeFileSync(path.join(unborn, 'README.md'), '# Unborn\n');
+    expect((await fetch(`${base}/api/scan?path=${encodeURIComponent(unborn)}`)).status).toBe(200);
+    const head = await fetch(`${base}/api/commits?${new URLSearchParams({ root: unborn })}`);
+    expect(head.status).toBe(200);
+    expect((await head.json()).commits).toEqual([]);
+    expect((await fetch(`${base}/api/commits?${new URLSearchParams({ root: unborn, branch: 'nope' })}`)).status).toBe(400);
+  });
 });

@@ -20,6 +20,7 @@ beforeAll(() => {
   w('lib.min.js', 'x();\n');
   w('package-lock.json', '{}\n');
   w('README.md', '# hi\n');
+  w('config.yaml', 'enabled: true\n');
   w('src/app.ts', [
     '// header comment',
     'import fs from "fs";',
@@ -82,7 +83,12 @@ describe('scan', () => {
     const files: string[] = [];
     const walk = (n: TreeNode) => (n.kind === 'file' ? files.push(n.path) : n.children?.forEach(walk));
     walk(s.root);
-    expect(files.sort()).toEqual(['py/mod.py', 'src/app.ts']);
+    expect(files.sort()).toEqual(['.gitignore', 'README.md', 'config.yaml', 'py/mod.py', 'src/app.ts']);
+    const hidden = await scan(dir, { showDocs: false });
+    const hiddenFiles: string[] = [];
+    const collect = (n: TreeNode) => (n.kind === 'file' ? hiddenFiles.push(n.path) : n.children?.forEach(collect));
+    collect(hidden.root);
+    expect(hiddenFiles.sort()).toEqual(['py/mod.py', 'src/app.ts']);
   });
 
   it('computes SLOC and splits TS into classes/functions', async () => {

@@ -156,7 +156,9 @@ describe('scan integration', () => {
     expect(snap.root.cov).toBeCloseTo(0.5);
     const rules = snap.hits!.map((h) => h.rule).sort();
     expect(rules).toEqual(['prompts-dir', 'sql-file']);
-    expect(snap.hits!.find((h) => h.rule === 'prompts-dir')!.nodeId).toBe('');
+    expect(snap.hits!.find((h) => h.rule === 'prompts-dir')!.nodeId).toBe('prompts/system.md');
+    const hidden = await scan(dir, { showDocs: false });
+    expect(hidden.hits!.find((h) => h.rule === 'prompts-dir')!.nodeId).toBe('');
     const none = await ingestCoverage(dir, [], 'missing.info');
     expect(none.available).toBe(false);
   });

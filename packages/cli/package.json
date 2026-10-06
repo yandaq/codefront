@@ -2,6 +2,7 @@
   "name": "grim-repo",
   "version": "0.1.0",
   "description": "Local-first codebase visualisation: treemap of folders/files/functions with git, complexity, coverage, coupling and LLM/SQL layers.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "grim-repo": "dist/index.js"

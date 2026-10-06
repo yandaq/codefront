@@ -43,6 +43,7 @@ export function App() {
   const [changes, setChanges] = useState<ChangeSel | null>(null);
   const [showLocal, setShowLocal] = useState(() => { try { return localStorage.getItem('grim.showLocal') !== '0'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('grim.showLocal', showLocal ? '1' : '0'); } catch { /* blocked */ } }, [showLocal]);
+  const [showDocs, setShowDocs] = useState(() => { try { return localStorage.getItem('grim.showDocs') !== '0'; } catch { return true; } });
   const uncAgg = useMemo(() => (snap?.uncommitted && Object.keys(snap.uncommitted.nodes).length ? aggregateChanges(snap.root, snap.uncommitted.nodes) : null), [snap]);
   const changeAgg = useMemo(() => (snap && changes ? aggregateChanges(snap.root, changes.diff.nodes) : null), [snap, changes]);
   const layerPainter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
@@ -93,8 +94,9 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [peek, palette]);
 
-  const run = async (p: string, o: { ref?: string; fetch?: boolean; rescan?: boolean } = {}) => {
+  const run = async (p: string, o: { ref?: string; fetch?: boolean; rescan?: boolean; showDocs?: boolean } = {}) => {
     if (!p) return;
+    const docs = o.showDocs ?? showDocs;
     const fresh = target.current !== p;
     if (fresh && watching) { const old = snap?.source.path; setWatching(false); if (old) fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: old, on: false }) }).catch(() => {}); }
     target.current = p;
@@ -102,10 +104,10 @@ export function App() {
     try {
       // instant reopen from the on-disk cache, then refresh below
       if (fresh && !o.ref) {
-        const c = await fetch(`/api/cached?path=${encodeURIComponent(p)}`).catch(() => null);
+        const c = await fetch(`/api/cached?${new URLSearchParams({ path: p, showDocs: String(docs) })}`).catch(() => null);
         if (c?.ok && target.current === p) setSnap(await c.json());
       }
-      const res = await fetch('/api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: p, ref: o.ref, fetch: o.fetch }) });
+      const res = await fetch('/api/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: p, ref: o.ref, fetch: o.fetch, showDocs: docs }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? res.statusText);
       if (target.current !== p) return;
@@ -113,7 +115,7 @@ export function App() {
       if (fresh) setAges({});
       setSnap(body);
       if (body.source?.type !== 'remote' && watchPref.current) {
-        fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: body.source.path, on: true }) })
+        fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: body.source.path, on: true, showDocs: docs }) })
           .then((r) => r.json()).then((b) => { if (target.current === p) setWatching(!!b.watching); }).catch(() => {});
       }
       if (body.source?.type === 'remote') fetch(`/api/branches?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((b) => setBranches(b.branches ?? [])).catch(() => {});
@@ -130,12 +132,18 @@ export function App() {
   const toggleWatch = async () => {
     if (!snap) return;
     const on = !watching;
-    const r = await fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: snap.source.path, on }) });
+    const r = await fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: snap.source.path, on, showDocs }) });
     const b = await r.json();
     if (!r.ok) { setError(b.error); return; }
     setWatching(b.watching);
     watchPref.current = on;
     try { localStorage.setItem('grim.watch', on ? '1' : '0'); } catch { /* blocked */ }
+  };
+  const toggleDocs = () => {
+    const next = !showDocs;
+    setShowDocs(next);
+    try { localStorage.setItem('grim.showDocs', next ? '1' : '0'); } catch { /* blocked */ }
+    if (target.current || path) run(target.current || path, { ref: snap?.source.ref, showDocs: next, rescan: true });
   };
   const savePat = async () => {
     if (!pat?.token) return;
@@ -190,10 +198,10 @@ export function App() {
   }, []);
 
   return (
-    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-uncommitted-tiles={uncAgg && showLocal ? uncAgg.size : 0} data-watching={watching ? '1' : '0'} data-fill={layer}>
+    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0} data-uncommitted-tiles={uncAgg && showLocal ? uncAgg.size : 0} data-watching={watching ? '1' : '0'} data-show-docs={showDocs ? '1' : '0'} data-files={snap?.stats.files ?? 0} data-fill={layer}>
       {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} changes={changeAgg} uncommitted={showLocal ? uncAgg : null} />}
       {snap && <div className="pointer-events-none absolute bottom-8 left-3 top-32 flex flex-col items-start justify-start">
-      <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} showLocal={showLocal} setShowLocal={setShowLocal} />
+      <ChangesPanel key={snap.source.path} snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} showLocal={showLocal} setShowLocal={setShowLocal} />
       </div>}
       {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
       <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
@@ -227,6 +235,11 @@ export function App() {
             placeholder="/path/to/local/repo or git URL (https, ssh, …/tree/branch)" value={path} onChange={(e) => setPath(e.target.value)} />
           <button className="rounded-md border border-cyan-400/40 bg-cyan-400/10 px-4 py-1.5 text-sm font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50" disabled={loading}>
             {loading ? 'Scanning…' : 'Scan'}
+          </button>
+          <button type="button" aria-pressed={showDocs} data-testid="docs-toggle" onClick={toggleDocs} disabled={loading}
+            title="Include documentation and configuration files in scans"
+            className={`rounded-md border px-3 py-1.5 text-xs disabled:opacity-50 ${showDocs ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-200' : 'border-slate-600 text-slate-400 hover:text-slate-200'}`}>
+            Docs/config
           </button>
           {snap && snap.source.type === 'remote' && branches.length > 0 && (
             <select aria-label="branch" className="rounded-md border border-cyan-400/20 bg-slate-950/60 px-2 py-1.5 font-mono text-xs text-slate-200" value={snap.source.ref ?? ''} disabled={loading}

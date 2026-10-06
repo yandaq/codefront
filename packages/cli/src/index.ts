@@ -19,7 +19,7 @@ const asTarget = (t: string | undefined) => (t ? (isGitUrl(t) ? t : path.resolve
 if (flag('help') || flag('h')) {
   console.log(`Usage:
   grim-repo [path|git-url] [--no-open] [--port N]     start the local UI
-  grim-repo scan <path|git-url> [--out snapshot.json] [--ref branch] [--no-cache]
+  grim-repo scan <path|git-url> [--out snapshot.json] [--ref branch] [--no-cache] [--no-docs]
                                                        headless scan to a portable JSON snapshot`);
   process.exit(0);
 }
@@ -30,7 +30,7 @@ if (positional[0] === 'scan') {
   const t0 = Date.now();
   let last = '';
   const { snapshot } = await scanTarget(target, {
-    ref: opt('ref'), useCache: !flag('no-cache'),
+    ref: opt('ref'), useCache: !flag('no-cache'), showDocs: !flag('no-docs'),
     onProgress: (p) => { if (p.stage !== last) { last = p.stage; process.stderr.write(`· ${p.stage}${p.message ? ` ${p.message}` : ''}\n`); } },
   });
   await writeFile(out, JSON.stringify(snapshot));

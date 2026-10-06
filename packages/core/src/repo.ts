@@ -58,6 +58,6 @@ export async function scanTarget(input: string, opts: TargetOptions & ScanOption
     if (u) snapshot.uncommitted = u;
   }
   // persist only default-option snapshots as the "reopen" snapshot
-  await cache?.save(!opts.showDocs && !opts.coverageReport ? snapshot : undefined);
+  await cache?.save(opts.showDocs !== false && !opts.coverageReport ? snapshot : undefined);
   return { snapshot, target, cache };
 }

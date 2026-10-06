@@ -174,4 +174,41 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       srv.kill();
     }
   }, 60000);
+
+  it('shows unborn documentation and preserves the Docs/config preference through watch rescans', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-unborn-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    writeFileSync(path.join(dir, 'README.md'), '# New repository\n\nInitial notes.\n');
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const browser = await chromium.launch();
+    try {
+      const url = await new Promise<string>((res, rej) => {
+        let out = '';
+        srv.stdout.on('data', (d) => { out += d; const m = /running at (\S+)/.exec(out); if (m) res(m[1]!); });
+        srv.on('exit', () => rej(new Error(`server exited: ${out}`)));
+      });
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(url);
+      const files = () => page.locator('[data-files]').getAttribute('data-files').then(Number);
+      await expect.poll(files, { timeout: 15000 }).toBe(1);
+      await expect.poll(() => page.locator('[data-no-commits]').textContent()).toBe('No commits yet');
+      await expect.poll(() => page.locator('[data-uncommitted-row]').textContent()).toContain('1 file');
+      expect(await page.locator('text=unknown ref: HEAD').count()).toBe(0);
+      await page.locator('[data-testid="docs-toggle"]').click();
+      await expect.poll(files, { timeout: 15000 }).toBe(0);
+      expect(await page.locator('[data-testid="docs-toggle"]').getAttribute('aria-pressed')).toBe('false');
+      writeFileSync(path.join(dir, 'NOTES.md'), '# Still hidden\n');
+      await page.waitForTimeout(1500);
+      expect(await files()).toBe(0);
+      await page.reload();
+      await expect.poll(() => page.locator('[data-testid="docs-toggle"]').getAttribute('aria-pressed'), { timeout: 15000 }).toBe('false');
+      await expect.poll(files).toBe(0);
+      await page.locator('[data-testid="docs-toggle"]').click();
+      await expect.poll(files, { timeout: 15000 }).toBe(2);
+    } finally {
+      await browser.close();
+      srv.kill();
+    }
+  }, 60000);
 });

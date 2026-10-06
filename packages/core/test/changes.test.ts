@@ -106,6 +106,20 @@ describe('changes / diff', () => {
 });
 
 describe('uncommitted changes', () => {
+  it('maps untracked documentation in an unborn repository by default', async () => {
+    const d = mkdtempSync(path.join(tmpdir(), 'grim-unborn-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+    writeFileSync(path.join(d, 'README.md'), '# New repository\n\nInitial notes.\n');
+    const { scanTarget } = await import('../src/index.js');
+    const { snapshot } = await scanTarget(d, { useCache: false });
+    expect(snapshot.git).toMatchObject({ available: true, commits: [] });
+    expect(findFile(snapshot.root, 'README.md')).toBeTruthy();
+    expect(snapshot.uncommitted?.files).toContainEqual(expect.objectContaining({ path: 'README.md', status: 'A', mapPath: 'README.md' }));
+    const hidden = (await scanTarget(d, { useCache: false, showDocs: false })).snapshot;
+    expect(findFile(hidden.root, 'README.md')).toBeNull();
+    expect(hidden.uncommitted?.files).toContainEqual(expect.objectContaining({ path: 'README.md', status: 'A', mapPath: null }));
+  });
+
   it('modified, staged, untracked and deleted files; empty after commit', async () => {
     const d = mkdtempSync(path.join(tmpdir(), 'grim-unc-'));
     const wr = (rel: string, s: string) => writeFileSync(path.join(d, rel), s);

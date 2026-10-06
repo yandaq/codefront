@@ -9,10 +9,10 @@ const DOC_EXT = new Set(['.md', '.mdx', '.txt', '.rst', '.json', '.yaml', '.yml'
 const BINARY_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.pdf', '.zip', '.gz', '.tar', '.wasm', '.woff', '.woff2', '.ttf', '.otf', '.eot', '.mp3', '.mp4', '.mov', '.so', '.dylib', '.dll', '.exe', '.bin', '.class', '.jar', '.pyc', '.o', '.a']);
 const MAX_BYTES = 1_000_000;
 
-export interface WalkOptions { showDocs?: boolean }
+export interface WalkOptions { /** Defaults to true; false hides documentation/config files. */ showDocs?: boolean }
 export interface WalkedFile { rel: string; abs: string }
 
-export function isExcludedName(name: string, showDocs = false): boolean {
+export function isExcludedName(name: string, showDocs = true): boolean {
   if (LOCKFILES.has(name)) return true;
   if (/\.min\.[a-z0-9]+$/i.test(name) || /\.generated\.[a-z0-9]+$/i.test(name)) return true;
   const ext = path.extname(name).toLowerCase();
@@ -52,7 +52,7 @@ export async function walk(root: string, opts: WalkOptions = {}): Promise<Walked
       const isDir = e.isDirectory();
       if (!isDir && !e.isFile()) continue;
       if (isDir && (SKIP_DIRS.has(e.name) || e.name.startsWith('.'))) continue;
-      if (!isDir && isExcludedName(e.name, opts.showDocs)) continue;
+      if (!isDir && isExcludedName(e.name, opts.showDocs !== false)) continue;
       const ignored = myRules.some((r) => {
         const sub = r.base ? path.posix.relative(r.base, rel) : rel;
         return r.ig.ignores(isDir ? sub + '/' : sub);

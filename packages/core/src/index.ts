@@ -28,6 +28,7 @@ export * from './repo.js';
 export * from './changes.js';
 
 export interface ScanOptions {
+  /** Include documentation/config files. Defaults to true; pass false to hide them. */
   showDocs?: boolean; coverageReport?: string; onProgress?: (p: ScanProgress) => void;
   /** Called with a file-level snapshot after walk + SLOC (progressive render), when anything needs parsing. */
   onPartial?: (s: Snapshot) => void;
@@ -65,7 +66,8 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
   const t0 = Date.now();
   const root = path.resolve(rootPath);
   const progress = (stage: ScanProgress['stage'], done: number, total: number) => opts.onProgress?.({ stage, done, total });
-  const files = await walk(root, { showDocs: opts.showDocs });
+  const showDocs = opts.showDocs !== false;
+  const files = await walk(root, { showDocs });
   progress('walk', files.length, files.length);
   // ---- content ids + cache lookup + SLOC ----
   const shas = await blobShas(root);
@@ -121,7 +123,7 @@ export async function scan(rootPath: string, opts: ScanOptions = {}): Promise<Sn
   }
   const rootNode = buildTree(rootName, nodes);
   // Prompt files (prompts/*.md etc.) are scanned even when docs are hidden from the map.
-  if (!opts.showDocs) {
+  if (!showDocs) {
     const seen = new Set(files.map((f) => f.rel));
     for (const f of await walk(root, { showDocs: true })) {
       if (seen.has(f.rel) || !isPromptFile(f.rel)) continue;
