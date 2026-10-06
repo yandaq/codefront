@@ -21,6 +21,11 @@ export const TIPS = {
   cochange: 'Edges between files that are committed together, from git history. Hidden code dependencies show up here even with no import.',
   minConf: 'Minimum confidence: how often a change to one file also changed the other, as a percentage. Raise it to show only strong pairs.',
   minCommits: 'Minimum number of shared commits before a pair is drawn; filters out one-off coincidences.',
+  changes: 'Changes between commits: pick one commit (vs its first parent) or shift-click a second for a range. Changed files and functions light up on the map (green added, amber modified, brighter = more lines); the layout stays the current snapshot. Click to collapse.',
+  changesBranch: 'Branch whose history is listed. Local repos list local branches (current by default); cloned remotes list the remote branches.',
+  changesCommits: 'Commits on the branch, newest first, with lines added/removed. Click one to see its changes; shift-click another to see the combined range older^..newer (both endpoints included).',
+  changesClear: 'Clear the selection and restore the normal fill layer (Esc also clears while this panel has focus).',
+  changesOffMap: 'Files deleted or renamed away since the selected commits, so they have no tile in the current snapshot.',
 } as const;
 export type TipId = keyof typeof TIPS;
 

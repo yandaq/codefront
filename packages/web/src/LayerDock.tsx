@@ -51,7 +51,7 @@ const LEGEND: Record<Exclude<LayerId, 'type'>, [string, string, string]> = {
 export function LayerDock({ layer, setLayer, window, setWindow, gitAvailable, loading, cx, setCx, coverageAvailable, pins, setPins, hitTotals, coupling, setCoupling, couplingAvailable }: Props) {
   const needsGit = LAYERS.find((l) => l.id === layer)?.git;
   return (
-    <div className="glass pointer-events-auto absolute bottom-3 right-3 w-64 rounded-xl p-3 font-mono text-xs">
+    <div className="glass pointer-events-auto w-64 shrink-0 rounded-xl p-3 font-mono text-xs">
       <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-cyan-300/80">Layers</div>
       <div className="flex flex-col gap-1">
         {LAYERS.map((l) => {

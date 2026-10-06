@@ -1,0 +1,106 @@
+import { describe, it, expect, beforeAll } from 'vitest';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, renameSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { scan, findFile, diffRange, listCommits, mapLine, resolveRef, refShapeOk, gitBranches, EMPTY_TREE } from '../src/index.js';
+import type { Snapshot, TreeNode } from '@grim-repo/schema';
+
+let dir: string;
+let snap: Snapshot;
+const sha: Record<string, string> = {};
+const w = (rel: string, s: string) => { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), s); };
+const fn = (name: string, body: number) => `export function ${name}(x: number) {\n${'  x = x + 1;\n'.repeat(body)}  return x;\n}\n`;
+function commit(name: string) {
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  execFileSync('git', ['add', '-A'], { cwd: dir, env });
+  execFileSync('git', ['commit', '-q', '-m', name], { cwd: dir, env });
+  sha[name] = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString().trim();
+}
+const ff = (rel: string) => findFile(snap.root, rel);
+const fnId = (file: string, name: string) => {
+  const hit = (n: TreeNode): TreeNode | undefined => (n.name === name && n.kind !== 'file' ? n : n.children?.map(hit).find(Boolean));
+  return hit(ff(file)!)!.id;
+};
+
+beforeAll(async () => {
+  dir = mkdtempSync(path.join(tmpdir(), 'grim-changes-'));
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  w('a.ts', fn('f', 3) + '\n' + fn('g', 3));
+  w('old.ts', 'export const gone = [\n' + Array.from({ length: 6 }, (_, i) => `  'item-${i}',\n`).join('') + '];\n');
+  w('mv.ts', fn('moved', 8));
+  commit('c1');
+  // c2: modify g (line 9 = first body line of g), add new.ts
+  w('a.ts', fn('f', 3) + '\n' + fn('g', 3).replace('x = x + 1;', 'x = x * 2;'));
+  w('new.ts', fn('h', 4));
+  commit('c2');
+  // c3: delete old.ts, rename mv.ts -> moved.ts
+  rmSync(path.join(dir, 'old.ts'));
+  renameSync(path.join(dir, 'mv.ts'), path.join(dir, 'moved.ts'));
+  commit('c3');
+  // c4: insert a new function above f, shifting everything in a.ts down by 6 lines
+  w('a.ts', fn('pre', 2) + fn('f', 3) + '\n' + fn('g', 3).replace('x = x + 1;', 'x = x * 2;'));
+  commit('c4');
+  snap = await scan(dir);
+});
+
+describe('changes / diff', () => {
+  it('lists commits newest first with numstat totals', async () => {
+    const cs = await listCommits(dir, 'main');
+    expect(cs.map((c) => c.subject)).toEqual(['c4', 'c3', 'c2', 'c1']);
+    expect(cs[2]!.parents).toEqual([sha.c1]);
+    expect(cs[2]!.added).toBeGreaterThan(0);
+    expect((await listCommits(dir, 'main', 1, 2)).map((c) => c.subject)).toEqual(['c3', 'c2']);
+    expect((await gitBranches(dir)).current).toBe('main');
+  });
+
+  it('single commit vs first parent: statuses and per-function attribution (to = HEAD)', async () => {
+    const r = await diffRange(dir, sha.c3!, sha.c4!, ff);
+    const a = r.files.find((f) => f.path === 'a.ts')!;
+    expect(a.status).toBe('M');
+    expect(r.nodes[fnId('a.ts', 'pre')]).toMatchObject({ s: 'A', a: 5 });
+    expect(r.nodes[fnId('a.ts', 'f')]).toBeUndefined();
+    expect(r.commits).toBe(1);
+  });
+
+  it('range diff with add/delete/rename statuses and "not on map" files', async () => {
+    const r = await diffRange(dir, sha.c1!, sha.c3!, ff);
+    const by = Object.fromEntries(r.files.map((f) => [f.path, f]));
+    expect(by['new.ts']!.status).toBe('A');
+    expect(by['old.ts']!.status).toBe('D');
+    expect(by['old.ts']!.mapPath).toBeNull();
+    expect(by['moved.ts']!).toMatchObject({ status: 'R', oldPath: 'mv.ts', mapPath: 'moved.ts' });
+    expect(r.nodes[fnId('new.ts', 'h')]!.s).toBe('A');
+    expect(r.commits).toBe(2);
+    expect(r.touched['new.ts']).toEqual([sha.c2]);
+  });
+
+  it('translates to-side lines into HEAD lines when later commits shift them', async () => {
+    // c2 changed g's first body line (line 9 at c2); c4 inserted 6 lines above, so in HEAD it is inside g, not f/pre
+    const r = await diffRange(dir, sha.c1!, sha.c2!, ff);
+    const g = fnId('a.ts', 'g');
+    expect(r.nodes[g]).toMatchObject({ s: 'M', a: 1, d: 1 });
+    expect(r.nodes[fnId('a.ts', 'f')]).toBeUndefined();
+    expect(r.nodes[fnId('a.ts', 'pre')]).toBeUndefined();
+    expect(r.files.find((f) => f.path === 'a.ts')!.fns.map((x) => x.name)).toEqual(['g']);
+  });
+
+  it('root commit diffs against the empty tree', async () => {
+    const r = await diffRange(dir, EMPTY_TREE, sha.c1!, ff);
+    expect(r.files.every((f) => f.status === 'A')).toBe(true);
+  });
+
+  it('mapLine shifts, and snaps changed lines to the nearest survivor', () => {
+    expect(mapLine(5, [[2, 0, 3, 4]])).toEqual({ line: 9, exact: true });
+    expect(mapLine(2, [[2, 0, 3, 4]])).toEqual({ line: 2, exact: true });
+    expect(mapLine(4, [[3, 3, 3, 1]])).toEqual({ line: 3, exact: false });
+    expect(mapLine(10, [[3, 3, 3, 1]])).toEqual({ line: 8, exact: true });
+  });
+
+  it('rejects option-like and malformed refs', async () => {
+    for (const bad of ['--upload-pack=touch /tmp/x', '-n', 'a..b', 'HEAD@{1}', 'x y', 'a;b', '', 'main~1']) expect(refShapeOk(bad)).toBe(false);
+    await expect(resolveRef(dir, '--output=/tmp/x')).rejects.toThrow(/invalid/);
+    await expect(resolveRef(dir, 'nope')).rejects.toThrow(/unknown/);
+    expect(await resolveRef(dir, 'main')).toBe(sha.c4);
+  });
+});

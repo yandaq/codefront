@@ -10,6 +10,8 @@ interface Props {
   snap: Snapshot; node: TreeNode; ix: Index; rows: (n: TreeNode) => MetricRow[];
   onSelect: (id: string) => void; onPeek: (p: PeekReq) => void; onClose: () => void;
   editor: Editor; setEditor: (e: Editor) => void;
+  /** +/- and touching commits within the Changes panel's selection, if any. */
+  changes?: { a: number; d: number; commits: { sha: string; subject: string }[] } | null;
 }
 
 const inside = (n: TreeNode, id?: string) => id != null && (id === n.id || (n.kind === 'folder' ? n.id === '' || id.startsWith(n.id + '/') : id.startsWith(n.id + '#') || id.startsWith(n.id + '/')));
@@ -46,7 +48,7 @@ function Snippet({ code, path, language }: { code: string; path: string; languag
   );
 }
 
-export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, editor, setEditor }: Props) {
+export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, editor, setEditor, changes }: Props) {
   const file = node.kind === 'folder' ? null : ix.fileOf.get(node.id) ?? null;
   const g = node.git ?? file?.git;
   const git = snap.git;
@@ -98,6 +100,13 @@ export function Inspector({ snap, node, ix, rows, onSelect, onPeek, onClose, edi
         )}
       </div>
       <div className="flex-1 overflow-y-auto">
+        {changes && (
+          <Section title="In selected commits">
+            <div className="flex justify-between"><span className="text-slate-400">Lines</span><span><span className="text-emerald-300">+{changes.a}</span> <span className="text-rose-300">−{changes.d}</span></span></div>
+            <ul className="mt-1">{changes.commits.slice(0, 12).map((c) => <li key={c.sha} className="flex gap-2 truncate"><span className="text-cyan-300">{c.sha.slice(0, 7)}</span><span className="truncate text-slate-300">{c.subject}</span></li>)}</ul>
+            {changes.commits.length > 12 && <div className="text-slate-500">+{changes.commits.length - 12} more</div>}
+          </Section>
+        )}
         <Section title="Layers">
           <ul className="space-y-1.5">
             {metrics.map((m) => (

@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWs from '@fastify/websocket';
 import {
   scanTarget, blameTree, isGitUrl, parseGitUrl, localRepoId, RepoCache, listBranches, repoDir, liteSnapshot, findFile,
-  loadKeytar, savePat, ignoreFilter, type ResolvedTarget,
+  loadKeytar, savePat, ignoreFilter, gitBranches, listCommits, diffRange, refShapeOk, EMPTY_TREE, type ResolvedTarget, type DiffResult,
 } from '@grim-repo/core';
 import { ScanRequestSchema, type ProgressMessage, type Snapshot, type ScanRequest } from '@grim-repo/schema';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
@@ -158,6 +158,36 @@ export async function startServer(opts: ServerOptions = {}) {
     if (!abs) return reply.code(403).send({ error: 'forbidden' });
     const text = await readFile(abs, 'utf8');
     return reply.type('text/plain; charset=utf-8').send(text);
+  });
+  // Changes panel: commit list + diff for a scanned root (refs validated, git run via execFile without a shell).
+  const diffCache = new WeakMap<Snapshot, Map<string, Promise<DiffResult>>>();
+  const scanned = (root?: string) => { const abs = path.resolve(root ?? ''); const s = root ? snaps.get(abs) : undefined; return s ? { abs, s } : null; };
+  const refOk = (r?: string): r is string => typeof r === 'string' && (r === EMPTY_TREE || refShapeOk(r));
+  app.get<{ Querystring: { root?: string } }>('/api/git/branches', async (req, reply) => {
+    const t = scanned(req.query.root);
+    if (!t) return reply.code(404).send({ error: 'scan first' });
+    return gitBranches(t.abs, t.s.source.type === 'remote');
+  });
+  app.get<{ Querystring: { root?: string; branch?: string; offset?: string; limit?: string } }>('/api/commits', async (req, reply) => {
+    const t = scanned(req.query.root);
+    if (!t) return reply.code(404).send({ error: 'scan first' });
+    if (!t.s.git?.available) return { git: false, commits: [] };
+    const branch = req.query.branch || 'HEAD';
+    if (!refOk(branch)) return reply.code(400).send({ error: 'invalid branch' });
+    try { return { git: true, commits: await listCommits(t.abs, branch, Number(req.query.offset) || 0, Number(req.query.limit) || 100) }; }
+    catch (e) { return reply.code(400).send(fail(e)); }
+  });
+  app.get<{ Querystring: { root?: string; from?: string; to?: string } }>('/api/diff', async (req, reply) => {
+    const t = scanned(req.query.root);
+    if (!t) return reply.code(404).send({ error: 'scan first' });
+    const { from, to } = req.query;
+    if (!refOk(from) || !refOk(to)) return reply.code(400).send({ error: 'invalid from/to' });
+    let m = diffCache.get(t.s);
+    if (!m) diffCache.set(t.s, (m = new Map()));
+    const key = `${t.abs}|${from}|${to}`;
+    let p = m.get(key);
+    if (!p) { p = diffRange(t.abs, from, to, (rel) => findFile(t.s.root, rel)); m.set(key, p); p.catch(() => m!.delete(key)); }
+    try { return await p; } catch (e) { return reply.code(400).send(fail(e)); }
   });
   app.get<{ Querystring: { path?: string } }>('/api/layers/age', async (req) => blaming.get(path.resolve(req.query.path ?? '')) ?? {});
   // Progress stream: stage events, partial/refreshed snapshots and layer updates.

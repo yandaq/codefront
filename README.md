@@ -41,6 +41,7 @@ pnpm test                          # Vitest (packages/core)
 - `GET /api/cached?path=` → last persisted snapshot (instant reopen) · `GET /api/branches?path=<url>`
 - `POST /api/watch` `{ root, on }` (local only) · `GET /api/detail?root=&path=` (lazy file detail for >50k-file repos)
 - `POST /api/auth/pat` `{ host, token }` → OS keychain
+- `GET /api/git/branches?root=` · `GET /api/commits?root=&branch=&offset=&limit=` (sha, parents, subject, author, date, +/−) · `GET /api/diff?root=&from=&to=` (per-file A/M/D/R status, counts, `-U0` hunks, per-function attribution; `root` must be a scanned root, refs strictly validated)
 - `WS /api/progress` → stage events (clone, walk, sloc, git, parse, detect, coverage, blame), partial / watch snapshots, blame layer updates
 
 ## Packages
@@ -52,3 +53,5 @@ pnpm test                          # Vitest (packages/core)
 
 ## Controls
 Scroll to zoom, drag to pan, click to dive one level, right-click / Esc to go up, breadcrumb to jump, Tab to cycle the exploded view off → medium → large (Shift+Tab steps back): tiles keep their size and arrangement and drift apart like an exploded-view diagram, folders far more than files.
+
+**Changes panel** (above the layer dock): pick a branch, click a commit to see what it changed (vs its first parent), or shift-click a second commit for the inclusive range `older^..newer`. Changed files and functions light up on the map (green added, amber modified, brighter = more lines) while everything else dims; folders with changes get a faint tint. The list shows changed files → functions with +/− (click to fly there) plus a "Not on map" section for deleted/renamed files. Clear (or Esc in the panel) restores the fill layer.

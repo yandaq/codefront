@@ -78,6 +78,7 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Open in editor: `vscode://file/...` (configurable: Cursor, JetBrains, …); remote repos link to host line URL.
 - `⌘K` fuzzy search over files/functions; camera flies to result.
 - `Tab` cycles an exploded view off → medium → large (`Shift+Tab` steps back; level shown on the toolbar chip, remembered per browser). It is a post-layout transform of the normal treemap: every tile keeps its size and relative position, and each child's offset from its parent's centre is scaled outward (top-level folders most, nested folders less, functions inside files not at all), parents growing to enclose them. Tiles glide straight outward via the diff tween and the camera re-fits the focus.
+- **Changes panel** (glass, above the layer dock, collapsible): branch selector (local branches with the current one as default; cloned remotes list the M6 remote branches), a virtualised commit list (short sha, subject, author, relative date, +/−; lazy-loaded 100 per page). Click a commit → its diff vs its first parent; shift-click a second → the inclusive range `older^..newer` (label e.g. `a1b2c3d^..d4e5f6a, 12 commits`). Clear button / Esc (panel focused) restores the fill layer. While a selection is active a "Changes" overlay replaces the fill layer (cross-faded): unchanged tiles dim, added files/functions green, modified amber, brightness on a log scale of lines changed, the top 5% glow, folders faintly tinted when they contain changes. The layout stays the current (work-tree) snapshot. The panel lists changed files (expandable to functions, click flies there) and a "Not on map" section for deleted/renamed-away files; tooltip and inspector ("In selected commits") show +/− and the touching commits. Server: `GET /api/commits`, `GET /api/diff` (`git diff --unified=0 -M`, refs validated via `rev-parse --verify --end-of-options`, execFile only, cached per snapshot); `to`-side lines are translated to the work tree via `git diff -U0 <to>` hunks before attributing added/deleted lines to the deepest function containing them (added = whole function inside added lines with no deletions, approximate). This is a diff viewer over the current map, not the out-of-scope timeline scrubber (§9).
 
 ## 8. Visual design — "Mission Control"
 - Dark hero theme (light toggle available). Background `#0a0e17`.
@@ -88,7 +89,7 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Hover: glass tooltip card with sparkline stats.
 
 ## 9. Out of scope (v1)
-- Timeline / git-history scrubber (keep snapshot data timestamped to allow it later).
+- Timeline / git-history scrubber (keep snapshot data timestamped to allow it later). The §7 Changes panel only recolours the current snapshot; it does not re-layout historical trees.
 - Running tests to produce coverage.
 - LLM-based classification.
 - Hosted/SaaS mode, GitHub API overlays (PRs/issues).

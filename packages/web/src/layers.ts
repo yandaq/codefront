@@ -158,3 +158,45 @@ export function hitCounts(snap: Snapshot): Map<string, HitCounts> {
   }
   return m;
 }
+
+/** Per-node change counts from /api/diff (`nodes`), keyed by node id. */
+export interface NodeChange { a: number; d: number; s: 'A' | 'M' }
+const mixHex = (a: number, b: number, t: number) => {
+  const ch = (s: number) => Math.round(((a >> s) & 255) + (((b >> s) & 255) - ((a >> s) & 255)) * t) << s;
+  return ch(16) | ch(8) | ch(0);
+};
+const CH_DIM = 0x0c1118, CH_ADD = 0x34d399, CH_MOD = 0xf5a524;
+
+/** Roll file/function changes up to every ancestor (folders, classes, small groups). */
+export function aggregateChanges(root: TreeNode, nodes: Record<string, NodeChange>): Map<string, NodeChange> {
+  const out = new Map<string, NodeChange>();
+  const rec = (n: TreeNode): NodeChange | null => {
+    let acc: NodeChange | null = null;
+    for (const c of n.children ?? []) { const v = rec(c); if (v) acc = acc ? { a: acc.a + v.a, d: acc.d + v.d, s: acc.s === 'A' && v.s === 'A' ? 'A' : 'M' } : { ...v }; }
+    const v = nodes[n.id] ?? acc;
+    if (v) out.set(n.id, v);
+    return v;
+  };
+  rec(root);
+  return out;
+}
+
+/** The "Changes" overlay: unchanged tiles dim, added green / modified amber scaled by log(lines), folders faintly tinted, top 5% glow. */
+export function makeChangesPainter(agg: Map<string, NodeChange>, kinds: (id: string) => TreeNode['kind'] | undefined): Painter {
+  const vals: number[] = [];
+  let max = 1;
+  agg.forEach((v, id) => { if (kinds(id) !== 'folder') { vals.push(v.a + v.d); max = Math.max(max, v.a + v.d); } });
+  vals.sort((x, y) => y - x);
+  const glowAt = Math.max(1, vals[Math.floor(vals.length * 0.05)] ?? Infinity);
+  const t = (v: NodeChange) => 0.35 + 0.65 * (Math.log1p(v.a + v.d) / Math.log1p(max));
+  return {
+    colour: (n) => {
+      const v = agg.get(n.id);
+      if (!v) return CH_DIM;
+      if (n.kind === 'folder') return mixHex(CH_DIM, CH_MOD, 0.16);
+      return mixHex(CH_DIM, v.s === 'A' ? CH_ADD : CH_MOD, t(v));
+    },
+    glow: (n) => { const v = agg.get(n.id); return !!v && n.kind !== 'folder' && v.a + v.d >= glowAt; },
+    describe: (n) => { const v = agg.get(n.id); return v ? `${v.s === 'A' ? 'added' : 'modified'} +${v.a} −${v.d}` : 'unchanged'; },
+  };
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -88,6 +88,42 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       expect(gapOf(await rects())).toBeGreaterThan(gapOf(r1));
       await p3.keyboard.press('Tab');
       await expect.poll(exploded).toBe('0');
+    } finally {
+      await browser.close();
+      srv.kill();
+    }
+  }, 60000);
+
+  it('Changes panel: clicking a commit highlights changed tiles, Clear restores', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-git-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, env });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x;\n}\n');
+    writeFileSync(path.join(dir, 'b.ts'), 'export const b = 1;\n');
+    git('add', '-A'); git('commit', '-qm', 'one');
+    writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x + 1;\n}\n');
+    git('commit', '-qam', 'two');
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const browser = await chromium.launch();
+    try {
+      const url = await new Promise<string>((res, rej) => {
+        let out = '';
+        srv.stdout.on('data', (d) => { out += d; const m = /running at (\S+)/.exec(out); if (m) res(m[1]!); });
+        srv.on('exit', () => rej(new Error(`server exited: ${out}`)));
+      });
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(url);
+      const changed = () => page.evaluate(() => Number(document.querySelector<HTMLElement>('[data-changed-tiles]')?.dataset.changedTiles ?? -1));
+      await page.locator('[data-commit]').first().waitFor({ timeout: 15000 });
+      expect(await changed()).toBe(0);
+      await page.locator('[data-commit]').first().click(); // "two": only a.ts (and its function) changed
+      await expect.poll(changed, { timeout: 10000 }).toBeGreaterThan(0);
+      await expect.poll(() => page.locator('[data-changed-files]').textContent()).toContain('a.ts');
+      expect(await page.locator('[data-changed-files]').textContent()).not.toContain('b.ts');
+      await page.locator('[data-changes-clear]').click();
+      await expect.poll(changed).toBe(0);
     } finally {
       await browser.close();
       srv.kill();

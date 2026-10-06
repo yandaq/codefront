@@ -25,6 +25,7 @@ export { ParsePool, analyzeAll, workerScript, defaultPoolSize } from './pool.js'
 export { RepoCache, grimHome, localRepoId, contentHash, sha1 } from './cache.js';
 export * from './remote.js';
 export * from './repo.js';
+export * from './changes.js';
 
 export interface ScanOptions {
   showDocs?: boolean; coverageReport?: string; onProgress?: (p: ScanProgress) => void;

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode, Stage } from '@grim-repo/schema';
 import { StatusBar, stageLoading } from './StatusBar';
 import { LayerDock, type PinState } from './LayerDock';
-import { hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
+import { aggregateChanges, hitCounts, makeChangesPainter, makePainter, type CxOptions, type LayerId } from './layers';
+import { ChangesPanel, type ChangeSel } from './ChangesPanel';
 import { Treemap } from './Treemap';
 import { mergeWsSnapshot } from './snapshot';
 import { Inspector, type PeekReq } from './Inspector';
@@ -37,7 +38,9 @@ export function App() {
   const [coup, setCoup] = useState<CouplingOptions>({ on: false, mode: 'imports', minConf: 30, minCommits: 5 });
   const edges = useMemo(() => (snap ? couplingEdges(snap, coup) : []), [snap, coup]);
   const hoverCoupling = useMemo(() => (hover && snap ? couplingStats(snap, hover.node) : null), [hover, snap]);
-  const painter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
+  const [changes, setChanges] = useState<ChangeSel | null>(null);
+  const changeAgg = useMemo(() => (snap && changes ? aggregateChanges(snap.root, changes.diff.nodes) : null), [snap, changes]);
+  const layerPainter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
   const hits = useMemo(() => (snap ? hitCounts(snap) : new Map()), [snap]);
   const hitTotals = useMemo(() => ({ llm: snap?.hits?.filter((h) => h.kind === 'llm').length ?? 0, sql: snap?.hits?.filter((h) => h.kind === 'sql').length ?? 0 }), [snap]);
   const hoverHits = useMemo(() => {
@@ -57,6 +60,16 @@ export function App() {
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
   const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
+  // the Changes overlay temporarily overrides the fill layer
+  const painter = useMemo(() => (changeAgg && ix ? makeChangesPainter(changeAgg, (id) => ix.byId.get(id)?.kind) : layerPainter), [changeAgg, ix, layerPainter]);
+  const changeInfo = (n: TreeNode | null) => {
+    if (!n || !changes || !changeAgg || !ix) return null;
+    const v = changeAgg.get(n.id);
+    const file = n.kind === 'folder' ? null : ix.fileOf.get(n.id) ?? n;
+    const shas = new Set<string>();
+    for (const [p, cs] of Object.entries(changes.diff.touched)) if (file ? p === file.path : n.id === '' || p.startsWith(n.path + '/')) cs.forEach((c) => shas.add(c));
+    return { a: v?.a ?? 0, d: v?.d ?? 0, commits: [...shas].map((s) => changes.subjects.get(s) ?? { sha: s, subject: '' }) };
+  };
   const selNode = selected != null ? ix?.byId.get(selected) ?? null : null;
   const select = (n: TreeNode | null) => { setSelected(n ? n.id : null); if (!n) setPeek(null); };
   const selectAndFly = (id: string) => { if (!ix?.byId.has(id)) return; setSelected(id); setFocusReq({ id, n: Date.now() }); };
@@ -166,16 +179,20 @@ export function App() {
   }, []);
 
   return (
-    <div className="relative h-full w-full font-sans">
+    <div className="relative h-full w-full font-sans" data-changed-tiles={changeAgg ? changeAgg.size : 0}>
       {snap && painter && <Treemap snapshot={snap} onFocusChange={setCrumbs} focusRequest={focusReq} painter={painter} onHover={setHover} pins={pins} hits={hits} edges={edges} edgeMode={coup.mode} selectedId={selected} onSelect={select} exploded={exploded} />}
-      {snap && <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
+      {snap && <div className="pointer-events-none absolute bottom-3 right-3 top-36 flex flex-col items-end justify-end gap-2">
+      <ChangesPanel snap={snap} active={changes} onChange={setChanges} onFly={selectAndFly} />
+      <LayerDock layer={layer} setLayer={setLayer} window={win} setWindow={setWin} gitAvailable={!!snap.git?.available} loading={{ ...stageLoading(stages), ...(ageProgress != null && ageProgress < 1 ? { age: ageProgress } : {}) }}
         cx={cx} setCx={setCx} coverageAvailable={!!snap.coverage?.available} pins={pins} setPins={setPins} hitTotals={hitTotals}
-        coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />}
+        coupling={coup} setCoupling={setCoup} couplingAvailable={!!snap.coupling} />
+      </div>}
       {hover && painter && (
         <div className="glass pointer-events-none fixed z-10 max-w-sm rounded-lg px-3 py-2 font-mono text-xs" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <div className="truncate text-cyan-200">{hover.node.path || '/'}{hover.node.kind !== 'file' && hover.node.kind !== 'folder' ? ` › ${hover.node.name}` : ''}</div>
           <div className="mt-0.5 text-slate-400">{hover.node.kind} · {hover.node.sloc.toLocaleString()} SLOC</div>
-          {layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
+          {changeAgg && (() => { const v = changeAgg.get(hover.node.id); return <div className={`mt-0.5 ${v ? (v.s === 'A' ? 'text-emerald-300' : 'text-amber-300') : 'text-slate-500'}`}>selected commits: {v ? `+${v.a} −${v.d}` : 'unchanged'}</div>; })()}
+          {!changeAgg && layer !== 'type' && <div className="mt-0.5 text-slate-200">{layer}: {painter.describe(hover.node) ?? '—'}</div>}
           {hoverCoupling && (hoverCoupling.inc > 0 || hoverCoupling.out > 0) && <div className="mt-0.5 text-sky-300">imports: {hoverCoupling.out} out · {hoverCoupling.inc} in</div>}
           {hoverCoupling?.top && <div className="mt-0.5 truncate text-fuchsia-300">co-change: {hoverCoupling.top.path} ({Math.round(hoverCoupling.top.conf * 100)}%, {hoverCoupling.top.n} commits)</div>}
           {hoverHits && (hoverHits.llm > 0 || hoverHits.sql > 0) && (
@@ -186,7 +203,7 @@ export function App() {
           )}
         </div>
       )}
-      {snap && ix && rows && selNode && <Inspector snap={snap} node={selNode} ix={ix} rows={rows} onSelect={selectAndFly} onPeek={setPeek} onClose={() => select(null)} editor={editor} setEditor={setEditor} />}
+      {snap && ix && rows && selNode && <Inspector snap={snap} node={selNode} ix={ix} rows={rows} onSelect={selectAndFly} onPeek={setPeek} onClose={() => select(null)} editor={editor} setEditor={setEditor} changes={changeInfo(selNode)} />}
       {snap && peek && <CodePeek snap={snap} req={peek} editor={editor} onClose={() => setPeek(null)} />}
       {snap && ix && palette && <Palette all={ix.all} onClose={() => setPalette(false)} onPick={(n) => { setPalette(false); selectAndFly(n.id); }} />}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 p-3">
