@@ -23,13 +23,37 @@ The repository is a TypeScript/pnpm monorepo. The complete v1 design is document
 
 Repository code is scanned as data and is never executed.
 
-## Requirements
+## Install
+
+Requires Node.js 20 or newer, plus Git on `PATH` for history features and remote repositories.
+
+Run it without installing:
+
+```sh
+npx codefront                                  # scan the current directory
+npx codefront /path/to/repository
+npx codefront https://github.com/owner/repository
+npx codefront scan /path/to/repository --out snapshot.json
+```
+
+Or install it globally:
+
+```sh
+npm install -g codefront
+codefront /path/to/repository
+```
+
+The CLI starts a server on a free loopback port and opens the UI in your browser.
+
+## Building from source
+
+### Requirements
 
 - Node.js 20 or newer
 - pnpm 10 (the workspace currently pins `pnpm@10.7.0`)
 - Git on `PATH` for history features and remote repositories
 
-## Quick start
+### Quick start
 
 ```sh
 pnpm install
@@ -54,7 +78,7 @@ node packages/cli/dist/index.js --no-open --port 4317 /path/to/repository
 
 Use `--verbose` to print scan timings and cache hit/miss information from the server.
 
-### Headless scan
+#### Headless scan
 
 ```sh
 node packages/cli/dist/index.js scan /path/to/repository --out snapshot.json
@@ -70,7 +94,7 @@ Headless scans write a portable snapshot matching the schema in `packages/schema
 --no-docs      Exclude documentation and configuration files
 ```
 
-### Package smoke test
+#### Package smoke test
 
 The CLI package bundles the server, core scanner, schema, and built web UI:
 
