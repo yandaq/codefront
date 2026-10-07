@@ -3,6 +3,23 @@
   "version": "0.1.0",
   "description": "Local-first codebase visualisation: treemap of folders/files/functions with git, complexity, coverage, coupling and LLM/SQL layers.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yandaq/codefront.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/yandaq/codefront#readme",
+  "bugs": "https://github.com/yandaq/codefront/issues",
+  "keywords": [
+    "codebase",
+    "visualization",
+    "treemap",
+    "git",
+    "complexity",
+    "code-churn",
+    "hotspots",
+    "cli"
+  ],
   "type": "module",
   "bin": {
     "codefront": "dist/index.js"
@@ -15,7 +32,8 @@
   },
   "scripts": {
     "build": "tsc -p . && node build.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node prepack.mjs"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",
