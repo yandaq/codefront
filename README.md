@@ -4,6 +4,8 @@
 
 The map can be coloured by code age, churn, hotspots, cognitive complexity, or test coverage. Independent overlays show imports, co-change relationships, LLM/SQL usage, selected commit ranges, and uncommitted work.
 
+![codefront exploring its own repository, coloured by cognitive complexity with import edges overlaid](codefront.png)
+
 The repository is a TypeScript/pnpm monorepo. The complete v1 design is documented in [docs/SPEC.md](docs/SPEC.md).
 
 ## Highlights
