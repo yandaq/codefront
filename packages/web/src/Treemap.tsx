@@ -465,7 +465,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         const glows: { x: number; y: number; w: number; h: number; s: number; added: boolean; faint: boolean }[] = [];
         const W = app.screen.width, H = app.screen.height;
         let li = 0, pi = 0;
-        const cands: { x: number; y: number; maxW: number; area: number; folder: boolean; dim: boolean; text: string }[] = [];
+        const cands: { x: number; y: number; maxW: number; maxH: number; area: number; folder: boolean; dim: boolean; text: string }[] = [];
         if (hitsSeen !== pinRef.current.hits) { hitsSeen = pinRef.current.hits; sumHits(); }
         const { pins } = pinRef.current;
         const ZERO: HitCounts = { llm: 0, sql: 0 };
@@ -504,8 +504,9 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           const dim = d.kind === 'module-scope' || d.kind === 'small-group';
           // glass body + depth "terrain" shading
           const layered = cur.colour(d) != null;
-          const fillA = d.kind === 'folder' ? 0.55 : layered ? (dim ? 0.6 : 0.78) : dim ? 0.35 : 0.42;
-          g.rect(x0, y0, w, h).fill({ color: mix(base, 0x0a0e17, Math.min(0.6, n.depth * 0.06)), alpha: fillA * alpha });
+          // folders are outline-only so nested levels don't stack tints over their children
+          const fillA = layered ? (dim ? 0.6 : 0.78) : dim ? 0.35 : 0.42;
+          if (isCode) g.rect(x0, y0, w, h).fill({ color: mix(base, 0x0a0e17, Math.min(0.6, n.depth * 0.06)), alpha: fillA * alpha });
           if (cur.hatch?.(d) && w > 4 && h > 4 && (!n.children || d.kind === 'file')) {
             // diagonal hatch = no data: lines x + y = const clipped to the rect
             for (let s2 = 6; s2 < w + h; s2 += 6) {
@@ -513,8 +514,8 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
             }
             g.stroke({ width: 1, color: 0x64748b, alpha: 0.45 * alpha });
           }
-          if (h > 6) g.rect(x0, y0, w, Math.min(h * 0.35, 18)).fill({ color: 0xffffff, alpha: 0.035 * alpha }); // top sheen
-          if (w > 8 && h > 8) g.rect(x0 + 1, y0 + h - Math.min(h * 0.25, 10), w - 2, Math.min(h * 0.25, 10) - 1).fill({ color: 0x000000, alpha: 0.12 * alpha }); // inset shadow
+          if (isCode && h > 6) g.rect(x0, y0, w, Math.min(h * 0.35, 18)).fill({ color: 0xffffff, alpha: 0.035 * alpha }); // top sheen
+          if (isCode && w > 8 && h > 8) g.rect(x0 + 1, y0 + h - Math.min(h * 0.25, 10), w - 2, Math.min(h * 0.25, 10) - 1).fill({ color: 0x000000, alpha: 0.12 * alpha }); // inset shadow
           // luminous 1px border
           const borderCol = isCode ? mix(base, 0xffffff, 0.35) : 0x38bdf8;
           g.rect(x0 + 0.5, y0 + 0.5, Math.max(0, w - 1), Math.max(0, h - 1)).stroke({ width: 1, color: borderCol, alpha: (dim ? 0.18 : isCode ? 0.55 : 0.22 + 0.25 / (1 + n.depth)) * alpha });
@@ -533,7 +534,7 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
           if (!intro && w > 44 && h > 16 && cands.length < 3000) {
             const lx = Math.max(0, x0), ly = Math.max(0, y0);
             const maxW = x0 + w - lx, maxH = y0 + h - ly;
-            if (maxW > 30 && maxH >= LABEL_H) cands.push({ x: lx, y: ly, maxW, area: w * h, folder: d.kind === 'folder', dim, text: d.kind === 'file' && w > 140 && h > 34 ? `${d.name}  ${d.sloc}` : d.name });
+            if (maxW > 30 && maxH >= LABEL_H) cands.push({ x: lx, y: ly, maxW, maxH, area: w * h, folder: d.kind === 'folder', dim, text: d.kind === 'file' && w > 140 && h > 34 ? `${d.name}  ${d.sloc}` : d.name });
           }
 
           const covered = { llm: 0, sql: 0 };
@@ -606,8 +607,15 @@ export function Treemap({ snapshot, onFocusChange, focusRequest, painter, onHove
         for (const c of cands) {
           if (li >= 400) break;
           const lw = Math.min(c.maxW, c.text.length * (c.folder ? 6.6 : 6.8) + 8);
-          const r: [number, number, number, number] = [c.x, c.y, c.x + lw, c.y + LABEL_H];
-          if (placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1])) continue;
+          // a child hugging its parent's top edge collides with the parent's label: slide down inside the tile instead of dropping it
+          const hits = (r: [number, number, number, number]) => placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1]);
+          let r: [number, number, number, number] = [c.x, c.y, c.x + lw, c.y + LABEL_H];
+          for (let k = 0; k < 3 && hits(r); k++) {
+            const below = Math.max(...placed.filter((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1]).map((p) => p[3]));
+            r = [c.x, below, c.x + lw, below + LABEL_H];
+          }
+          if (r[3] > c.y + c.maxH || hits(r)) continue;
+          c.y = r[1];
           placed.push(r);
           let lab = labelPool[li];
           if (!lab) { lab = document.createElement('div'); labelPool.push(lab); labelsEl.appendChild(lab); }
