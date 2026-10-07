@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { grimHome, sha1 } from './cache.js';
+import { codefrontHome, sha1 } from './cache.js';
 
 const exec = promisify(execFile);
 
@@ -80,7 +80,7 @@ export function loadKeytar(): Promise<any | null> {
   keytarP ??= import('keytar' as string).then((m) => m.default ?? m).catch(() => null);
   return keytarP;
 }
-const KEYCHAIN_SERVICE = 'grim-repo';
+const KEYCHAIN_SERVICE = 'codefront';
 export async function savePat(host: string, token: string): Promise<boolean> {
   const k = await loadKeytar(); if (!k) return false;
   await k.setPassword(KEYCHAIN_SERVICE, host, token); return true;
@@ -116,7 +116,7 @@ export async function gitEnv(info: Pick<RemoteInfo, 'cloneUrl' | 'host'>): Promi
 
 // ---------------- clone / fetch / branches ----------------
 
-export const repoDir = (info: Pick<RemoteInfo, 'id'>) => path.join(grimHome(), 'repos', info.id);
+export const repoDir = (info: Pick<RemoteInfo, 'id'>) => path.join(codefrontHome(), 'repos', info.id);
 
 function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, onLine?: (l: string) => void, timeout?: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -142,7 +142,7 @@ export function gitProgress(line: string): { phase: string; pct: number } | null
 
 export interface CloneOptions { onProgress?: (msg: string, pct: number) => void }
 
-/** Clone (blobless) into ~/.grim-repo/repos/<id>, or reuse an existing clone. Returns the work tree path. */
+/** Clone (blobless) into ~/.codefront/repos/<id>, or reuse an existing clone. Returns the work tree path. */
 export async function ensureClone(info: RemoteInfo, opts: CloneOptions = {}): Promise<{ dir: string; cloned: boolean }> {
   const dir = repoDir(info);
   if (existsSync(path.join(dir, '.git'))) return { dir, cloned: false };

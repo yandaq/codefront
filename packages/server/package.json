@@ -1,5 +1,5 @@
 {
-  "name": "@grim-repo/server",
+  "name": "@codefront/server",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -21,9 +21,9 @@
   "dependencies": {
     "@fastify/static": "^8.0.0",
     "@fastify/websocket": "^11.0.0",
-    "@grim-repo/core": "workspace:*",
-    "@grim-repo/schema": "workspace:*",
-    "@grim-repo/web": "workspace:*",
+    "@codefront/core": "workspace:*",
+    "@codefront/schema": "workspace:*",
+    "@codefront/web": "workspace:*",
     "fastify": "^5.1.0",
     "chokidar": "^4.0.1"
   },

@@ -1,4 +1,4 @@
-import { churnFor, complexityOf, type ChurnWindow, type Snapshot, type TreeNode } from '@grim-repo/schema';
+import { churnFor, complexityOf, type ChurnWindow, type Snapshot, type TreeNode } from '@codefront/schema';
 import { fmtAge, percentiles } from './layers';
 
 export interface MetricRow { label: string; value: string; pct: number | null }

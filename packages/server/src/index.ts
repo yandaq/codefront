@@ -10,8 +10,8 @@ import fastifyWs from '@fastify/websocket';
 import {
   scanTarget, blameTree, isGitUrl, parseGitUrl, localRepoId, RepoCache, listBranches, repoDir, liteSnapshot, findFile,
   loadKeytar, savePat, ignoreFilter, gitBranches, listCommits, diffRange, refShapeOk, EMPTY_TREE, fetchRemotes, listRemotes, type ResolvedTarget, type DiffResult,
-} from '@grim-repo/core';
-import { ScanRequestSchema, type ProgressMessage, type Snapshot, type ScanRequest } from '@grim-repo/schema';
+} from '@codefront/core';
+import { ScanRequestSchema, type ProgressMessage, type Snapshot, type ScanRequest } from '@codefront/schema';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 
 export interface ServerOptions { port?: number; host?: string; defaultPath?: string; webRoot?: string; liteFiles?: number; log?: (msg: string) => void }
@@ -19,7 +19,7 @@ export interface ServerOptions { port?: number; host?: string; defaultPath?: str
 function resolveWebRoot(): string | null {
   try {
     const require = createRequire(import.meta.url);
-    const dir = path.join(path.dirname(require.resolve('@grim-repo/web/package.json')), 'dist');
+    const dir = path.join(path.dirname(require.resolve('@codefront/web/package.json')), 'dist');
     return existsSync(dir) ? dir : null;
   } catch { return null; }
 }
@@ -28,7 +28,7 @@ export async function startServer(opts: ServerOptions = {}) {
   const app = Fastify({ logger: false });
   await app.register(fastifyWs);
   const log = opts.log ?? (() => {});
-  const liteFiles = opts.liteFiles ?? Number(process.env.GRIM_LITE_FILES ?? 50_000);
+  const liteFiles = opts.liteFiles ?? Number(process.env.CODEFRONT_LITE_FILES ?? 50_000);
   const listeners = new Set<(p: ProgressMessage) => void>();
   const send = (m: ProgressMessage) => listeners.forEach((l) => l(m));
   const blaming = new Map<string, Record<string, number>>(); // root -> ages delivered so far

@@ -45,16 +45,16 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
-      '@grim-repo/core':
+      '@codefront/core':
         specifier: workspace:*
         version: link:../core
-      '@grim-repo/schema':
+      '@codefront/schema':
         specifier: workspace:*
         version: link:../schema
-      '@grim-repo/server':
+      '@codefront/server':
         specifier: workspace:*
         version: link:../server
-      '@grim-repo/web':
+      '@codefront/web':
         specifier: workspace:*
         version: link:../web
       esbuild:
@@ -73,7 +73,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@grim-repo/schema':
+      '@codefront/schema':
         specifier: workspace:*
         version: link:../schema
       ignore:
@@ -106,21 +106,21 @@ importers:
 
   packages/server:
     dependencies:
+      '@codefront/core':
+        specifier: workspace:*
+        version: link:../core
+      '@codefront/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@codefront/web':
+        specifier: workspace:*
+        version: link:../web
       '@fastify/static':
         specifier: ^8.0.0
         version: 8.3.0
       '@fastify/websocket':
         specifier: ^11.0.0
         version: 11.3.3
-      '@grim-repo/core':
-        specifier: workspace:*
-        version: link:../core
-      '@grim-repo/schema':
-        specifier: workspace:*
-        version: link:../schema
-      '@grim-repo/web':
-        specifier: workspace:*
-        version: link:../web
       chokidar:
         specifier: ^4.0.1
         version: 4.0.3
@@ -138,7 +138,7 @@ importers:
 
   packages/web:
     dependencies:
-      '@grim-repo/schema':
+      '@codefront/schema':
         specifier: workspace:*
         version: link:../schema
       d3-hierarchy:

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scan, blameTree, renameTarget } from '../src/index.js';
-import { churnFor, SnapshotSchema, type Snapshot, type TreeNode } from '@grim-repo/schema';
+import { churnFor, SnapshotSchema, type Snapshot, type TreeNode } from '@codefront/schema';
 
 const DAY = 86400;
 const NOW = Math.floor(Date.now() / 1000);
@@ -21,7 +21,7 @@ function commit(daysAgo: number, msg: string) {
 const w = (rel: string, s: string) => { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), s); };
 
 beforeAll(async () => {
-  dir = mkdtempSync(path.join(tmpdir(), 'grim-git-'));
+  dir = mkdtempSync(path.join(tmpdir(), 'codefront-git-'));
   execFileSync('git', ['init', '-q'], { cwd: dir });
   w('src/a.ts', 'export function f() {\n  return 1;\n}\n\nexport function g() {\n  return 2;\n}\n');
   w('src/b.ts', 'export const b = 1;\n');
@@ -79,7 +79,7 @@ describe('git history', () => {
   });
 
   it('handles non-git dirs gracefully', async () => {
-    const d = mkdtempSync(path.join(tmpdir(), 'grim-nogit-'));
+    const d = mkdtempSync(path.join(tmpdir(), 'codefront-nogit-'));
     writeFileSync(path.join(d, 'x.ts'), 'const x = 1;\n');
     const s = await scan(d);
     expect(s.git?.available).toBe(false);

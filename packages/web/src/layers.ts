@@ -1,6 +1,6 @@
 import { scaleSequentialLog } from 'd3-scale';
 import { interpolateCool, interpolateMagma, interpolateInferno } from 'd3-scale-chromatic';
-import { churnFor, complexityOf, type ChurnWindow, type Snapshot, type TreeNode } from '@grim-repo/schema';
+import { churnFor, complexityOf, type ChurnWindow, type Snapshot, type TreeNode } from '@codefront/schema';
 
 export type LayerId = 'type' | 'age' | 'churn' | 'hotspots' | 'complexity' | 'coverage';
 export const LAYERS: { id: LayerId; label: string; git?: boolean }[] = [

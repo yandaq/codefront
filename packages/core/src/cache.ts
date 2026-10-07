@@ -2,12 +2,12 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 import { ANALYSIS_VERSION, type FileAnalysis } from './analyze.js';
 import type { RawHistory, BlameCache } from './git.js';
 
-/** Root for clones and caches (`~/.grim-repo`; override with GRIM_REPO_HOME, e.g. in tests). */
-export const grimHome = () => process.env.GRIM_REPO_HOME ?? path.join(os.homedir(), '.grim-repo');
+/** Root for clones and caches (`~/.codefront`; override with CODEFRONT_HOME, e.g. in tests). */
+export const codefrontHome = () => process.env.CODEFRONT_HOME ?? path.join(os.homedir(), '.codefront');
 export const sha1 = (s: string | Buffer) => createHash('sha1').update(s).digest('hex');
 export const contentHash = (text: string) => `c:${sha1(text)}`;
 /** Repo id for a local path. */
@@ -23,7 +23,7 @@ async function writeJson(f: string, v: unknown) {
 }
 
 /**
- * On-disk cache in `~/.grim-repo/cache/<repo-id>/`: last snapshot, per-file analysis keyed by path + blob SHA,
+ * On-disk cache in `~/.codefront/cache/<repo-id>/`: last snapshot, per-file analysis keyed by path + blob SHA,
  * raw git history (for incremental refresh), and blame ages keyed by path + blob + HEAD.
  */
 export class RepoCache {
@@ -37,7 +37,7 @@ export class RepoCache {
   private constructor(readonly dir: string) {}
 
   static async open(id: string): Promise<RepoCache> {
-    const c = new RepoCache(path.join(grimHome(), 'cache', id));
+    const c = new RepoCache(path.join(codefrontHome(), 'cache', id));
     await fs.mkdir(c.dir, { recursive: true });
     const files = await readJson<{ v: number; files: Record<string, FileAnalysis> }>(path.join(c.dir, 'files.json'));
     if (files?.v === ANALYSIS_VERSION) c.files = new Map(Object.entries(files.files));

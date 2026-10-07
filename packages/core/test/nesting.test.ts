@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scan } from '../src/index.js';
-import type { TreeNode } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
 
 const file = (n: TreeNode, p: string): TreeNode | undefined => (n.kind === 'file' && n.path === p ? n : n.children?.map((c) => file(c, p)).find(Boolean));
 const flat = (n: TreeNode): TreeNode[] => [n, ...(n.children ?? []).flatMap(flat)];
@@ -11,7 +11,7 @@ const depthIn = (n: TreeNode): number => (n.children?.length ? 1 + Math.max(...n
 const body = (k: number) => '    x = x + 1;\n'.repeat(k);
 
 describe('named inner functions become child tiles', async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'grim-nest-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'codefront-nest-'));
   writeFileSync(path.join(dir, 'w.tsx'), `export default function Workspace() {
   let x = 0;
   x = x + 1;

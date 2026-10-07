@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { decodeRanges, type Snapshot, type TreeNode, type ScanProgress, type Hit, type Coverage } from '@grim-repo/schema';
+import { decodeRanges, type Snapshot, type TreeNode, type ScanProgress, type Hit, type Coverage } from '@codefront/schema';
 import { walk, readTextFile } from './walk.js';
 import { readHistory, applyHistory, blobShas } from './git.js';
 import { detectFile, isPromptFile } from './detect.js';
@@ -22,7 +22,7 @@ export * from './coverage.js';
 export * from './coupling.js';
 export { analyzeFile, plainFile, ANALYSIS_VERSION, type FileAnalysis } from './analyze.js';
 export { ParsePool, analyzeAll, workerScript, defaultPoolSize } from './pool.js';
-export { RepoCache, grimHome, localRepoId, contentHash, sha1 } from './cache.js';
+export { RepoCache, codefrontHome, localRepoId, contentHash, sha1 } from './cache.js';
 export * from './remote.js';
 export * from './repo.js';
 export * from './changes.js';

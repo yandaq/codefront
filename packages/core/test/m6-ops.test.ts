@@ -49,8 +49,8 @@ const w = (rel: string, s: string) => { mkdirSync(path.dirname(path.join(dir, re
 const commit = (m: string) => { g('add', '-A'); g('commit', '-q', '-m', m); };
 
 beforeAll(() => {
-  process.env.GRIM_REPO_HOME = mkdtempSync(path.join(tmpdir(), 'grim-home-'));
-  dir = mkdtempSync(path.join(tmpdir(), 'grim-m6-'));
+  process.env.CODEFRONT_HOME = mkdtempSync(path.join(tmpdir(), 'codefront-home-'));
+  dir = mkdtempSync(path.join(tmpdir(), 'codefront-m6-'));
   g('init', '-q');
   w('src/a.ts', 'export function a(x: number) {\n  if (x) return 1;\n  return 2;\n}\n');
   w('src/b.py', 'def b(x):\n    return x\n');
@@ -77,7 +77,7 @@ describe('blob-SHA analysis cache', () => {
     expect(hashOf(s3, 'src/a.ts')).toMatch(/^c:/);
     expect(hashOf(s1, 'src/a.ts')).toMatch(/^[0-9a-f]{40}$/);
     // persisted snapshot for instant reopen
-    const cached = JSON.parse(readFileSync(path.join(process.env.GRIM_REPO_HOME!, 'cache', (await scanTarget(dir, { workers: 0 })).target.id, 'snapshot.json'), 'utf8'));
+    const cached = JSON.parse(readFileSync(path.join(process.env.CODEFRONT_HOME!, 'cache', (await scanTarget(dir, { workers: 0 })).target.id, 'snapshot.json'), 'utf8'));
     expect(cached.stats.files).toBe(4);
     g('checkout', '-q', '--', 'src/a.ts'); execFileSync('rm', [path.join(dir, 'src/new.ts')]);
   });

@@ -1,4 +1,4 @@
-import type { TreeNode } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
 import type { Item } from './parse.js';
 
 export const SMALL_SLOC = 3;

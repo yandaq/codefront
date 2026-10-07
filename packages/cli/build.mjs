@@ -8,13 +8,13 @@ const require = createRequire(import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const external = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {})];
 rmSync('dist', { recursive: true, force: true });
-const coreDir = path.dirname(require.resolve('@grim-repo/core/package.json'));
+const coreDir = path.dirname(require.resolve('@codefront/core/package.json'));
 await build({
   entryPoints: { index: 'src/index.ts', 'parse-worker': path.join(coreDir, 'src/parse-worker.ts') },
   outdir: 'dist', bundle: true, platform: 'node', format: 'esm', target: 'node20', sourcemap: true, splitting: true, chunkNames: 'chunks/[name]-[hash]',
   conditions: ['source'], external, logLevel: 'warning',
 });
-const webDist = path.join(path.dirname(require.resolve('@grim-repo/web/package.json')), 'dist');
-if (!existsSync(webDist)) throw new Error('build @grim-repo/web first');
+const webDist = path.join(path.dirname(require.resolve('@codefront/web/package.json')), 'dist');
+if (!existsSync(webDist)) throw new Error('build @codefront/web first');
 cpSync(webDist, 'dist/web', { recursive: true });
 console.log('cli bundled → dist/ (+ web assets)');

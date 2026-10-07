@@ -1,4 +1,4 @@
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 
 export interface CouplingOptions { on: boolean; mode: 'imports' | 'cochange'; minConf: number; minCommits: number }
 /** File-level edge (paths); directed for imports. */

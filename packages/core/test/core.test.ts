@@ -3,14 +3,14 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scan } from '../src/index.js';
-import type { TreeNode } from '@grim-repo/schema';
-import { SnapshotSchema } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
+import { SnapshotSchema } from '@codefront/schema';
 
 let dir: string;
 const find = (n: TreeNode, p: string): TreeNode | undefined => n.path === p && n.kind === 'file' ? n : n.children?.map((c) => find(c, p)).find(Boolean);
 
 beforeAll(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'grim-fixture-'));
+  dir = mkdtempSync(path.join(tmpdir(), 'codefront-fixture-'));
   const w = (rel: string, s: string) => { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), s); };
   w('.gitignore', 'ignored.ts\nsecret/\n');
   w('ignored.ts', 'const a = 1;\n');

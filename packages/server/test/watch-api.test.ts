@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 
 const node20 = Number(process.versions.node.split('.')[0]) >= 20;
 
@@ -30,8 +30,8 @@ describe.skipIf(!node20)('watch API', () => {
   };
 
   beforeAll(async () => {
-    process.env.GRIM_REPO_HOME = mkdtempSync(path.join(tmpdir(), 'grim-watch-home-'));
-    dir = mkdtempSync(path.join(tmpdir(), 'grim-watch-api-'));
+    process.env.CODEFRONT_HOME = mkdtempSync(path.join(tmpdir(), 'codefront-watch-home-'));
+    dir = mkdtempSync(path.join(tmpdir(), 'codefront-watch-api-'));
     writeFileSync(path.join(dir, 'a.ts'), 'export const a = 1;\n');
     const { startServer } = await import('../src/index.js');
     const started = await startServer({ webRoot: dir });

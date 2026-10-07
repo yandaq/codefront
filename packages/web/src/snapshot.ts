@@ -1,4 +1,4 @@
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 
 const hasDetail = (n: TreeNode): boolean => (n.kind === 'file' ? !!n.children?.length : !!n.children?.some(hasDetail));
 

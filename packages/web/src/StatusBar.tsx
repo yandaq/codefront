@@ -1,4 +1,4 @@
-import { STAGES, type Stage } from '@grim-repo/schema';
+import { STAGES, type Stage } from '@codefront/schema';
 import type { LayerId } from './layers';
 
 const LABEL: Record<Stage, string> = { clone: 'clone', walk: 'walk', sloc: 'SLOC', git: 'git history', parse: 'parse', detect: 'detectors', coverage: 'coverage', blame: 'blame', fetch: 'fetch' };

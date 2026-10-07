@@ -3,20 +3,20 @@ import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { SnapshotSchema } from '@grim-repo/schema';
+import { SnapshotSchema } from '@codefront/schema';
 
 const bin = path.resolve(__dirname, '../dist/index.js');
 
 describe.skipIf(!existsSync(bin))('headless scan (bundled CLI)', () => {
   it('writes a valid snapshot without starting a server, using the cache on rerun', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-cli-'));
-    const home = mkdtempSync(path.join(tmpdir(), 'grim-cli-home-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-cli-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'codefront-cli-home-'));
     writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x ? 1 : 2;\n}\n');
     writeFileSync(path.join(dir, 'b.rs'), 'fn main() {\n    let x = 1;\n}\n');
     writeFileSync(path.join(dir, 'README.md'), '# fixture\n');
     writeFileSync(path.join(dir, 'config.yaml'), 'enabled: true\n');
     const out = path.join(home, 'snap.json');
-    const run = (...extra: string[]) => execFileSync(process.execPath, [bin, 'scan', dir, '--out', out, ...extra], { env: { ...process.env, GRIM_REPO_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const run = (...extra: string[]) => execFileSync(process.execPath, [bin, 'scan', dir, '--out', out, ...extra], { env: { ...process.env, CODEFRONT_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     run();
     const snap = SnapshotSchema.parse(JSON.parse(readFileSync(out, 'utf8')));
     expect(snap.stats.files).toBe(4);

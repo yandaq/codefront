@@ -1,7 +1,7 @@
-import { hostLineUrl, type Snapshot } from '@grim-repo/schema';
+import { hostLineUrl, type Snapshot } from '@codefront/schema';
 
 export type Editor = 'vscode' | 'cursor' | 'jetbrains' | 'none';
-const KEY = 'grim-repo.editor';
+const KEY = 'codefront.editor';
 export function loadEditor(): Editor {
   try { const v = localStorage.getItem(KEY); if (v === 'vscode' || v === 'cursor' || v === 'jetbrains' || v === 'none') return v; } catch { /* storage blocked */ }
   return 'vscode';

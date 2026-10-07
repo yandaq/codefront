@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Snapshot } from '@grim-repo/schema';
+import type { Snapshot } from '@codefront/schema';
 import type { NodeChange } from './layers';
 import { Tip } from './Tip';
 
@@ -26,8 +26,8 @@ export function ChangesPanel({ snap, onChange, onFly, active, showLocal, setShow
   const [local, setLocal] = useState(false);
   useEffect(() => { if (!unc) setLocal(false); }, [unc]);
   const root = snap.source.path;
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('grim.changes.open') !== '0'; } catch { return true; } });
-  useEffect(() => { try { localStorage.setItem('grim.changes.open', open ? '1' : '0'); } catch { /* blocked */ } }, [open]);
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('codefront.changes.open') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('codefront.changes.open', open ? '1' : '0'); } catch { /* blocked */ } }, [open]);
   const [git, setGit] = useState<boolean | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState<string>('');

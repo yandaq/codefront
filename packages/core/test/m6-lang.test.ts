@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeFile, ImportResolver, parseSource } from '../src/index.js';
-import type { TreeNode } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
 
 const fns = (n: TreeNode, out: Record<string, number | undefined> = {}) => { if (n.kind === 'function') out[n.name] = n.cx; n.children?.forEach((c) => fns(c, out)); return out; };
 const kinds = (n: TreeNode): string[] => [n.kind + ':' + n.name, ...(n.children ?? []).flatMap(kinds)];

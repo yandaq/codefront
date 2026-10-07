@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { GitMetrics, TreeNode } from '@grim-repo/schema';
+import type { GitMetrics, TreeNode } from '@codefront/schema';
 
 const exec = promisify(execFile);
 

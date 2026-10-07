@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode, Stage } from '@grim-repo/schema';
+import type { ChurnWindow, ProgressMessage, Snapshot, TreeNode, Stage } from '@codefront/schema';
 import { StatusBar, stageLoading } from './StatusBar';
 import { LayerDock, type PinState } from './LayerDock';
 import { aggregateChanges, hitCounts, makePainter, type CxOptions, type LayerId } from './layers';
@@ -23,7 +23,7 @@ export function App() {
   const [branches, setBranches] = useState<string[]>([]);
   const [watching, setWatching] = useState(false);
   /** User preference: watch local repos (default on, persisted). */
-  const watchPref = useRef((() => { try { return localStorage.getItem('grim.watch') !== '0'; } catch { return true; } })());
+  const watchPref = useRef((() => { try { return localStorage.getItem('codefront.watch') !== '0'; } catch { return true; } })());
   const [keytar, setKeytar] = useState<boolean | null>(null);
   const [pat, setPat] = useState<{ host: string; token: string } | null>(null);
   /** The target the user asked for (path or URL); progress messages are tagged with it. */
@@ -41,9 +41,9 @@ export function App() {
   const edges = useMemo(() => (snap ? couplingEdges(snap, coup) : []), [snap, coup]);
   const hoverCoupling = useMemo(() => (hover && snap ? couplingStats(snap, hover.node) : null), [hover, snap]);
   const [changes, setChanges] = useState<ChangeSel | null>(null);
-  const [showLocal, setShowLocal] = useState(() => { try { return localStorage.getItem('grim.showLocal') !== '0'; } catch { return true; } });
-  useEffect(() => { try { localStorage.setItem('grim.showLocal', showLocal ? '1' : '0'); } catch { /* blocked */ } }, [showLocal]);
-  const [showDocs, setShowDocs] = useState(() => { try { return localStorage.getItem('grim.showDocs') !== '0'; } catch { return true; } });
+  const [showLocal, setShowLocal] = useState(() => { try { return localStorage.getItem('codefront.showLocal') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('codefront.showLocal', showLocal ? '1' : '0'); } catch { /* blocked */ } }, [showLocal]);
+  const [showDocs, setShowDocs] = useState(() => { try { return localStorage.getItem('codefront.showDocs') !== '0'; } catch { return true; } });
   const uncAgg = useMemo(() => (snap?.uncommitted && Object.keys(snap.uncommitted.nodes).length ? aggregateChanges(snap.root, snap.uncommitted.nodes) : null), [snap]);
   const changeAgg = useMemo(() => (snap && changes ? aggregateChanges(snap.root, changes.diff.nodes) : null), [snap, changes]);
   const layerPainter = useMemo(() => (snap ? makePainter(layer, snap, win, ages, cx) : null), [snap, layer, win, ages, cx]);
@@ -61,8 +61,8 @@ export function App() {
   const [peek, setPeek] = useState<PeekReq | null>(null);
   const [palette, setPalette] = useState(false);
   // exploded view level: 0 off, 1 medium, 2 large (Tab cycles forward, Shift+Tab back)
-  const [exploded, setExploded] = useState(() => { try { const raw = localStorage.getItem('grim.exploded'); if (raw == null) return 1; const v = Number(raw); return v === 0 || v === 2 ? v : 1; } catch { return 1; } });
-  useEffect(() => { try { localStorage.setItem('grim.exploded', String(exploded)); } catch { /* storage blocked */ } }, [exploded]);
+  const [exploded, setExploded] = useState(() => { try { const raw = localStorage.getItem('codefront.exploded'); if (raw == null) return 1; const v = Number(raw); return v === 0 || v === 2 ? v : 1; } catch { return 1; } });
+  useEffect(() => { try { localStorage.setItem('codefront.exploded', String(exploded)); } catch { /* storage blocked */ } }, [exploded]);
   const [editor, setEditor] = useState<Editor>(loadEditor);
   const ix = useMemo(() => (snap ? indexTree(snap.root) : null), [snap]);
   const rows = useMemo(() => (snap && ix ? metricRows(snap, ix, win, ages) : null), [snap, ix, win, ages]);
@@ -137,12 +137,12 @@ export function App() {
     if (!r.ok) { setError(b.error); return; }
     setWatching(b.watching);
     watchPref.current = on;
-    try { localStorage.setItem('grim.watch', on ? '1' : '0'); } catch { /* blocked */ }
+    try { localStorage.setItem('codefront.watch', on ? '1' : '0'); } catch { /* blocked */ }
   };
   const toggleDocs = () => {
     const next = !showDocs;
     setShowDocs(next);
-    try { localStorage.setItem('grim.showDocs', next ? '1' : '0'); } catch { /* blocked */ }
+    try { localStorage.setItem('codefront.showDocs', next ? '1' : '0'); } catch { /* blocked */ }
     if (target.current || path) run(target.current || path, { ref: snap?.source.ref, showDocs: next, rescan: true });
   };
   const savePat = async () => {
@@ -230,7 +230,7 @@ export function App() {
       {snap && ix && palette && <Palette all={ix.all} onClose={() => setPalette(false)} onPick={(n) => { setPalette(false); selectAndFly(n.id); }} />}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 p-3">
         <form className="glass pointer-events-auto flex items-center gap-3 rounded-xl px-3 py-2" onSubmit={(e) => { e.preventDefault(); run(path); }}>
-          <span className="font-mono text-sm font-semibold tracking-widest text-cyan-300">GRIM<span className="text-slate-500">·</span>REPO</span>
+          <span className="font-mono text-sm font-semibold tracking-widest text-cyan-300">CODE<span className="text-slate-500">·</span>FRONT</span>
           <input className="flex-1 rounded-md border border-cyan-400/20 bg-slate-950/60 px-3 py-1.5 font-mono text-sm text-slate-200 outline-none focus:border-cyan-400/60 focus:shadow-[0_0_12px_rgba(34,211,238,0.25)]"
             placeholder="/path/to/local/repo or git URL (https, ssh, …/tree/branch)" value={path} onChange={(e) => setPath(e.target.value)} />
           <button className="rounded-md border border-cyan-400/40 bg-cyan-400/10 px-4 py-1.5 text-sm font-medium text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50" disabled={loading}>

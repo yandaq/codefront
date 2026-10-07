@@ -1,5 +1,5 @@
 {
-  "name": "@grim-repo/core",
+  "name": "@codefront/core",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@grim-repo/schema": "workspace:*",
+    "@codefront/schema": "workspace:*",
     "ignore": "^6.0.2",
     "web-tree-sitter": "0.22.6",
     "tree-sitter-wasms": "^0.1.12"

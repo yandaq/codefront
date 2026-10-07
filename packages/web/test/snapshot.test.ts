@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 import { mergeWsSnapshot } from '../src/snapshot';
 
 const file = (detail: boolean): TreeNode => ({ id: 'a.ts', kind: 'file', name: 'a.ts', path: 'a.ts', sloc: 3,

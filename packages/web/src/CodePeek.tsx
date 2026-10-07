@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ThemedToken } from 'shiki/core';
-import { decodeRanges, type Snapshot } from '@grim-repo/schema';
+import { decodeRanges, type Snapshot } from '@codefront/schema';
 import { langOf, tokenize } from './highlight';
 import type { PeekReq } from './Inspector';
 import { openUrl, type Editor } from './settings';

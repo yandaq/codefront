@@ -1,4 +1,4 @@
-import type { Hit } from '@grim-repo/schema';
+import type { Hit } from '@codefront/schema';
 import type { CallSite, StrLit } from './parse.js';
 import { defaultRules, type Rules, type Lang } from './rules/default-rules.js';
 

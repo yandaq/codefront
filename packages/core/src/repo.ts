@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Snapshot } from '@grim-repo/schema';
+import type { Snapshot } from '@codefront/schema';
 import { scan, type ScanOptions } from './index.js';
 import { uncommittedChanges } from './changes.js';
 import { findFile } from './index.js';

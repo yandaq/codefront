@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Hit, TreeNode } from '@grim-repo/schema';
+import type { Hit, TreeNode } from '@codefront/schema';
 import { codeLines, fallbackComments } from './sloc.js';
 import { languageFor, parseSource, type ImportRef } from './parse.js';
 import { buildFileChildren } from './build.js';

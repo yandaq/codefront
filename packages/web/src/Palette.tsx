@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { TreeNode } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
 import { fuzzySearch } from './fuzzy';
 
 interface Item { node: TreeNode; label: string }

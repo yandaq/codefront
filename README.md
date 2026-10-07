@@ -1,6 +1,6 @@
-# grim-repo
+# codefront
 
-`grim-repo` is a local-first codebase explorer. Point it at a local directory or a Git URL and it builds an interactive treemap of folders, files, classes, and functions, with each tile sized by source lines of code (SLOC).
+`codefront` is a local-first codebase explorer. Point it at a local directory or a Git URL and it builds an interactive treemap of folders, files, classes, and functions, with each tile sized by source lines of code (SLOC).
 
 The map can be coloured by code age, churn, hotspots, cognitive complexity, or test coverage. Independent overlays show imports, co-change relationships, LLM/SQL usage, selected commit ranges, and uncommitted work.
 
@@ -75,7 +75,7 @@ The CLI package bundles the server, core scanner, schema, and built web UI:
 ```sh
 cd packages/cli
 npm pack
-npx ./grim-repo-0.1.0.tgz --no-open /path/to/repository
+npx ./codefront-0.1.0.tgz --no-open /path/to/repository
 ```
 
 ## Using the UI
@@ -107,7 +107,7 @@ For local repositories, Fetch updates remote-tracking refs with `git fetch --pru
 
 ## Coverage reports
 
-grim-repo searches up to five directory levels for common report names and merges matching line data. Supported formats are:
+codefront searches up to five directory levels for common report names and merges matching line data. Supported formats are:
 
 - LCOV (`lcov.info`)
 - Istanbul (`coverage-final.json`)
@@ -115,30 +115,30 @@ grim-repo searches up to five directory levels for common report names and merge
 - JaCoCo (`jacoco.xml`)
 - Go cover profiles (`cover.out`, `coverage.out`)
 
-Tests are not run by grim-repo. Generate a report with your normal test command, then rescan.
+Tests are not run by codefront. Generate a report with your normal test command, then rescan.
 
 ## Remote repositories and authentication
 
-Remote repositories are cloned with `--filter=blob:none` into the grim-repo data directory. Hooks are disabled, Git LFS smudging is skipped, interactive credential prompts are disabled, and repository code is not executed.
+Remote repositories are cloned with `--filter=blob:none` into the codefront data directory. Hooks are disabled, Git LFS smudging is skipped, interactive credential prompts are disabled, and repository code is not executed.
 
-Authentication is attempted through the normal SSH or Git credential setup. For HTTPS, grim-repo can also use:
+Authentication is attempted through the normal SSH or Git credential setup. For HTTPS, codefront can also use:
 
 1. `gh auth token` for `github.com`
 2. A personal access token stored in the operating-system keychain through the optional `keytar` dependency
 
-Tokens injected by grim-repo are passed to Git in memory and are not written to repository configuration or logs.
+Tokens injected by codefront are passed to Git in memory and are not written to repository configuration or logs.
 
 ## Cache and scan behaviour
 
-By default, data is stored under `~/.grim-repo`:
+By default, data is stored under `~/.codefront`:
 
 ```text
-~/.grim-repo/
+~/.codefront/
 ├── repos/<repo-id>/   # managed blobless clones
 └── cache/<repo-id>/   # file analysis, history, blame, and latest snapshot
 ```
 
-Set `GRIM_REPO_HOME` to move that directory. Set `GRIM_LITE_FILES` to change the large-repository threshold (default: 50,000 files); above it, sub-file detail is fetched lazily when a file is selected.
+Set `CODEFRONT_HOME` to move that directory. Set `CODEFRONT_LITE_FILES` to change the large-repository threshold (default: 50,000 files); above it, sub-file detail is fetched lazily when a file is selected.
 
 Scans respect nested `.gitignore` files and generated/vendored paths marked in `.gitattributes`. Documentation and configuration files are included by default; pass `showDocs: false`, use the UI toggle, or use headless `--no-docs` to hide them. Common dependency, build, cache, and VCS directories plus lockfiles, binaries, minified/generated files, and files larger than 1 MB are always excluded. Prompt files are still checked by the detector when documentation is hidden.
 
@@ -166,11 +166,11 @@ pnpm start -- .  # run the built CLI against this repository
 
 | Package | Responsibility |
 | --- | --- |
-| `@grim-repo/schema` | Zod schemas, snapshot types, and shared metric helpers |
-| `@grim-repo/core` | Walking, parsing, SLOC, Git/history, cache, coverage, detectors, and coupling |
-| `@grim-repo/server` | Fastify HTTP/WebSocket API, static UI, watch mode, and safe source access |
-| `@grim-repo/web` | React/Vite UI and PixiJS treemap renderer |
-| `grim-repo` | Publishable CLI bundle and headless scanner |
+| `@codefront/schema` | Zod schemas, snapshot types, and shared metric helpers |
+| `@codefront/core` | Walking, parsing, SLOC, Git/history, cache, coverage, detectors, and coupling |
+| `@codefront/server` | Fastify HTTP/WebSocket API, static UI, watch mode, and safe source access |
+| `@codefront/web` | React/Vite UI and PixiJS treemap renderer |
+| `codefront` | Publishable CLI bundle and headless scanner |
 
 Workspace packages expose a `source` export condition so editors resolve types from `src/index.ts` without a rebuild. Production declaration files are emitted through each package's `tsconfig.build.json`.
 

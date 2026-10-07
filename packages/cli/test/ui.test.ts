@@ -13,15 +13,15 @@ const hasBrowser = node20 && (() => { try { return existsSync(chromium.executabl
 // Regression: function/class sub-squares must actually be drawn inside a file once zoomed in.
 describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist/web/index.html')) || !hasBrowser)('treemap UI (headless Chromium)', () => {
   it('draws function tiles inside a zoomed file', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-'));
-    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-ui-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'codefront-ui-home-'));
     mkdirSync(path.join(dir, 'src'));
     const fns = Array.from({ length: 4 }, (_, i) => `export function f${i}(x: number) {\n${'  x = x + 1;\n'.repeat(20)}  return x;\n}\n`).join('\n');
     writeFileSync(path.join(dir, 'src', 'big.ts'), `export class K {\n  m() { return 1; }\n}\n${fns}`);
     mkdirSync(path.join(dir, 'deep/a/b/c'), { recursive: true });
     writeFileSync(path.join(dir, 'deep/a/b/c/deep.ts'), Array.from({ length: 3 }, (_, i) => `export function d${i}(x: number) {\n${'  x = x + 1;\n'.repeat(12)}  return x;\n}\n`).join('\n'));
     writeFileSync(path.join(dir, 'small.ts'), 'export const y = 1;\n');
-    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, CODEFRONT_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     const browser = await chromium.launch();
     try {
       const url = await new Promise<string>((res, rej) => {
@@ -43,7 +43,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       // a single double-click from the overview on a deep file lands straight on that file
       // (wide viewport so the inspector opened by the first click doesn't cover the deep file)
       const p2 = await browser.newPage({ viewport: { width: 2000, height: 800 } });
-      await p2.addInitScript(() => localStorage.setItem('grim.exploded', '0'));
+      await p2.addInitScript(() => localStorage.setItem('codefront.exploded', '0'));
       await p2.goto(url);
       await p2.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
       await p2.waitForTimeout(1500);
@@ -54,7 +54,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       expect(await p2.evaluate(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0))).toBeGreaterThan(0);
       // Tab cycles the exploded view (off -> medium -> large -> off): tiles keep their size and order, folders drift apart
       const p3 = await browser.newPage({ viewport: { width: 1200, height: 800 } });
-      await p3.addInitScript(() => localStorage.setItem('grim.exploded', '0'));
+      await p3.addInitScript(() => localStorage.setItem('codefront.exploded', '0'));
       await p3.goto(url);
       await p3.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-fn-tiles]')?.dataset.fnTiles ?? 0) > 0, null, { timeout: 15000 });
       // layer dock help tooltip: hover a row, glass tooltip appears; Esc dismisses it
@@ -95,8 +95,8 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
   }, 60000);
 
   it('Changes panel: clicking a commit highlights changed tiles, Clear restores', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-git-'));
-    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-ui-git-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'codefront-ui-home-'));
     const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
     const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, env });
     git('init', '-q', '-b', 'main');
@@ -105,7 +105,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
     git('add', '-A'); git('commit', '-qm', 'one');
     writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x + 1;\n}\n');
     git('commit', '-qam', 'two');
-    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, CODEFRONT_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     const browser = await chromium.launch();
     try {
       const url = await new Promise<string>((res, rej) => {
@@ -129,7 +129,7 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
       await expect.poll(changed).toBe(0);
       // Fetch button: absent without a remote, present (and working) once one exists
       expect(await page.locator('[data-git-fetch]').count()).toBe(0);
-      const bare = mkdtempSync(path.join(tmpdir(), 'grim-ui-bare-'));
+      const bare = mkdtempSync(path.join(tmpdir(), 'codefront-ui-bare-'));
       execFileSync('git', ['init', '-q', '--bare', bare]);
       git('remote', 'add', 'origin', bare); git('push', '-q', 'origin', 'main');
       await page.reload();
@@ -142,14 +142,14 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
   }, 60000);
 
   it('uncommitted changes pulse live with watch on by default, and clear after a commit', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-unc-'));
-    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-ui-unc-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'codefront-ui-home-'));
     const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
     const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, env });
     git('init', '-q', '-b', 'main');
     writeFileSync(path.join(dir, 'a.ts'), 'export function f(x: number) {\n  return x;\n}\n');
     git('add', '-A'); git('commit', '-qm', 'one');
-    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, CODEFRONT_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     const browser = await chromium.launch();
     try {
       const url = await new Promise<string>((res, rej) => {
@@ -176,11 +176,11 @@ describe.skipIf(!existsSync(bin) || !existsSync(path.resolve(__dirname, '../dist
   }, 60000);
 
   it('shows unborn documentation and preserves the Docs/config preference through watch rescans', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-ui-unborn-'));
-    const home = mkdtempSync(path.join(tmpdir(), 'grim-ui-home-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-ui-unborn-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'codefront-ui-home-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
     writeFileSync(path.join(dir, 'README.md'), '# New repository\n\nInitial notes.\n');
-    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, GRIM_REPO_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const srv = spawn(process.execPath, [bin, '--no-open', '--port=0', dir], { env: { ...process.env, CODEFRONT_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     const browser = await chromium.launch();
     try {
       const url = await new Promise<string>((res, rej) => {

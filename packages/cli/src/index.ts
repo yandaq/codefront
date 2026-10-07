@@ -3,7 +3,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { scanTarget, isGitUrl } from '@grim-repo/core';
+import { scanTarget, isGitUrl } from '@codefront/core';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -18,8 +18,8 @@ const asTarget = (t: string | undefined) => (t ? (isGitUrl(t) ? t : path.resolve
 
 if (flag('help') || flag('h')) {
   console.log(`Usage:
-  grim-repo [path|git-url] [--no-open] [--port N]     start the local UI
-  grim-repo scan <path|git-url> [--out snapshot.json] [--ref branch] [--no-cache] [--no-docs]
+  codefront [path|git-url] [--no-open] [--port N]     start the local UI
+  codefront scan <path|git-url> [--out snapshot.json] [--ref branch] [--no-cache] [--no-docs]
                                                        headless scan to a portable JSON snapshot`);
   process.exit(0);
 }
@@ -43,9 +43,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const bundledWeb = path.join(here, 'web'); // present in the published (bundled) package
 const port = opt('port');
 // server (fastify) is loaded lazily so headless `scan` stays lightweight
-const { startServer } = await import('@grim-repo/server');
+const { startServer } = await import('@codefront/server');
 const { address } = await startServer({ port: port ? Number(port) : 0, defaultPath: target, webRoot: existsSync(bundledWeb) ? bundledWeb : undefined,
   log: flag('verbose') ? (m) => console.log(m) : undefined });
 const url = `${address}/?path=${encodeURIComponent(target)}`;
-console.log(`grim-repo running at ${url}\nPress Ctrl+C to stop.`);
+console.log(`codefront running at ${url}\nPress Ctrl+C to stop.`);
 if (!flag('no-open')) (await import('open')).default(url).catch(() => {});

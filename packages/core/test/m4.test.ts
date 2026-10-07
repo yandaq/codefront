@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseSource, scan, ImportResolver, cognitiveComplexity } from '../src/index.js';
-import { SnapshotSchema, type Snapshot } from '@grim-repo/schema';
+import { SnapshotSchema, type Snapshot } from '@codefront/schema';
 
 const mk = (files: Record<string, string>) => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'grim-m4-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'codefront-m4-'));
   for (const [rel, s] of Object.entries(files)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), s); }
   return dir;
 };

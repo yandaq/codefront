@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { GitMetrics } from '@grim-repo/schema';
+import type { GitMetrics } from '@codefront/schema';
 import type { ImportRef } from './parse.js';
 
 const P = path.posix;

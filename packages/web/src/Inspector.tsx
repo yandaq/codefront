@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { contributors, type Hit, type Snapshot, type TreeNode } from '@grim-repo/schema';
+import { contributors, type Hit, type Snapshot, type TreeNode } from '@codefront/schema';
 import type { Index, MetricRow } from './metrics';
 import { openUrl, saveEditor, type Editor } from './settings';
 import { langOf, tokenize } from './highlight';

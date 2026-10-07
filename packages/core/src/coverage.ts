@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { encodeRanges, type Coverage } from '@grim-repo/schema';
+import { encodeRanges, type Coverage } from '@codefront/schema';
 
 /** Raw parsed report: report path -> (line -> hit count). */
 export type LineHits = Map<string, Map<number, number>>;

@@ -1,4 +1,4 @@
-import { CHURN_WINDOWS, type ChurnWindow } from '@grim-repo/schema';
+import { CHURN_WINDOWS, type ChurnWindow } from '@codefront/schema';
 import type { CouplingOptions } from './coupling';
 import { Tip, type TipId } from './Tip';
 import { LAYERS, legendGradient, type CxOptions, type LayerId } from './layers';

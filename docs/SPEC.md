@@ -1,10 +1,10 @@
-# grim-repo — Specification (v1)
+# codefront — Specification (v1)
 
 A local-first codebase visualisation tool. The user points it at a local path or any git URL; it scans the repo and renders a nested treemap (folders → files → classes → functions, sized by SLOC) with weather-app-style overlay layers.
 
 ## 1. Runtime & packaging
-- Local-first: `npx grim-repo [path|url]` starts a Node server on a free localhost port and opens the browser.
-- Headless: `grim-repo scan <path|url> --out snapshot.json` produces a portable, self-contained JSON snapshot (future hosted viewer).
+- Local-first: `npx codefront [path|url]` starts a Node server on a free localhost port and opens the browser.
+- Headless: `codefront scan <path|url> --out snapshot.json` produces a portable, self-contained JSON snapshot (future hosted viewer).
 - Node 20+, `git` on PATH. No other native deps (tree-sitter via WASM).
 - pnpm monorepo, TypeScript everywhere:
   - `packages/schema` — snapshot types + zod schemas (shared)
@@ -16,7 +16,7 @@ A local-first codebase visualisation tool. The user points it at a local path or
 
 ## 2. Inputs
 - Local path, or any git URL (GitHub, GitLab, Bitbucket, …). Accepts `/tree/<branch>` forms; branch dropdown after clone.
-- Clone: `git clone --filter=blob:none` into `~/.grim-repo/repos/<id>`.
+- Clone: `git clone --filter=blob:none` into `~/.codefront/repos/<id>`.
 - Auth: `gh auth token` → git credential helper/SSH → user PAT stored in OS keychain (`keytar`). Never plaintext.
 - No hosting API dependency in v1. Cloned code is **never executed**.
 
@@ -66,7 +66,7 @@ Hierarchical edge bundling (`d3.curveBundle`) at file level; auto-aggregate to f
 - Parsing in a `worker_threads` pool.
 - Incremental rescan: cache keyed by git blob SHA (content hash for dirty working-tree files); git history fetched incrementally from last-seen commit; remote repos `git fetch` + reset.
 - Rescan animated diff: changed squares pulse, layout tweens to new sizes.
-- Cache: `~/.grim-repo/cache/<repo-id>/` — reopen is instant.
+- Cache: `~/.codefront/cache/<repo-id>/` — reopen is instant.
 - **Watch mode** (local repos, default on; turning it off persists): chokidar → debounced incremental rescan. Also watches `.git/HEAD`, `index`, `refs`, `packed-refs` so `git add` / `commit` / `checkout` rescan too.
 - **Uncommitted changes**: every scan of a local git work tree records `snapshot.uncommitted` (`git diff HEAD -U0 -M` plus untracked files as fully added), attributed per file and function like the Changes diff. Drawn as a pulsing white glow (~1.4s breathing, own layer) independent of any commit selection; the committed-selection glow is static and the pulse wins on tiles with both. The Changes panel pins an "Uncommitted" row (+x −y · n files) that lists the files/functions; "Show local changes" (persisted) hides the pulse. Tooltip and inspector show uncommitted +/−.
 

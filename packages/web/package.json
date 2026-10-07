@@ -1,5 +1,5 @@
 {
-  "name": "@grim-repo/web",
+  "name": "@codefront/web",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@grim-repo/schema": "workspace:*",
+    "@codefront/schema": "workspace:*",
     "d3-hierarchy": "^3.1.2",
     "d3-scale": "^4.0.2",
     "d3-scale-chromatic": "^3.1.0",

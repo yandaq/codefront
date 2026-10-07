@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scan, findFile, diffRange, listCommits, mapLine, resolveRef, refShapeOk, gitBranches, EMPTY_TREE } from '../src/index.js';
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 
 let dir: string;
 let snap: Snapshot;
@@ -24,7 +24,7 @@ const fnId = (file: string, name: string) => {
 };
 
 beforeAll(async () => {
-  dir = mkdtempSync(path.join(tmpdir(), 'grim-changes-'));
+  dir = mkdtempSync(path.join(tmpdir(), 'codefront-changes-'));
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
   w('a.ts', fn('f', 3) + '\n' + fn('g', 3));
   w('old.ts', 'export const gone = [\n' + Array.from({ length: 6 }, (_, i) => `  'item-${i}',\n`).join('') + '];\n');
@@ -107,7 +107,7 @@ describe('changes / diff', () => {
 
 describe('uncommitted changes', () => {
   it('maps untracked documentation in an unborn repository by default', async () => {
-    const d = mkdtempSync(path.join(tmpdir(), 'grim-unborn-'));
+    const d = mkdtempSync(path.join(tmpdir(), 'codefront-unborn-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
     writeFileSync(path.join(d, 'README.md'), '# New repository\n\nInitial notes.\n');
     const { scanTarget } = await import('../src/index.js');
@@ -121,7 +121,7 @@ describe('uncommitted changes', () => {
   });
 
   it('modified, staged, untracked and deleted files; empty after commit', async () => {
-    const d = mkdtempSync(path.join(tmpdir(), 'grim-unc-'));
+    const d = mkdtempSync(path.join(tmpdir(), 'codefront-unc-'));
     const wr = (rel: string, s: string) => writeFileSync(path.join(d, rel), s);
     const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
     const g = (...a: string[]) => execFileSync('git', a, { cwd: d, env });

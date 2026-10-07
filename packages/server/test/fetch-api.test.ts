@@ -11,8 +11,8 @@ const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, env }
 describe.skipIf(!node20)('POST /api/git/fetch (fetch only)', () => {
   let srv: { close: () => Promise<void> }, base: string, local: string, other: string, plain: string;
   beforeAll(async () => {
-    process.env.GRIM_REPO_HOME = mkdtempSync(path.join(tmpdir(), 'grim-fetch-home-'));
-    const t = mkdtempSync(path.join(tmpdir(), 'grim-fetch-'));
+    process.env.CODEFRONT_HOME = mkdtempSync(path.join(tmpdir(), 'codefront-fetch-home-'));
+    const t = mkdtempSync(path.join(tmpdir(), 'codefront-fetch-'));
     const bare = path.join(t, 'remote.git'); local = path.join(t, 'local'); other = path.join(t, 'other'); plain = path.join(t, 'plain');
     git(t, 'init', '-q', '--bare', '-b', 'main', bare);
     git(t, 'clone', '-q', bare, other);

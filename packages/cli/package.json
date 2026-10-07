@@ -1,11 +1,11 @@
 {
-  "name": "grim-repo",
+  "name": "codefront",
   "version": "0.1.0",
   "description": "Local-first codebase visualisation: treemap of folders/files/functions with git, complexity, coverage, coupling and LLM/SQL layers.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "grim-repo": "dist/index.js"
+    "codefront": "dist/index.js"
   },
   "files": [
     "dist"
@@ -32,10 +32,10 @@
     "keytar": "^7.9.0"
   },
   "devDependencies": {
-    "@grim-repo/core": "workspace:*",
-    "@grim-repo/schema": "workspace:*",
-    "@grim-repo/server": "workspace:*",
-    "@grim-repo/web": "workspace:*",
+    "@codefront/core": "workspace:*",
+    "@codefront/schema": "workspace:*",
+    "@codefront/server": "workspace:*",
+    "@codefront/web": "workspace:*",
     "esbuild": "^0.24.0",
     "playwright-core": "1.62.0",
     "vitest": "^2.1.0"

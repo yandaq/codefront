@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseSource, scan, detectSource, sqlConfidence, parseLcov, parseIstanbul, parseCobertura, parseJacoco, parseGoCover, makeResolver, ingestCoverage } from '../src/index.js';
-import { decodeRanges, type TreeNode } from '@grim-repo/schema';
+import { decodeRanges, type TreeNode } from '@codefront/schema';
 
 const cx = async (src: string, lang: 'typescript' | 'python') => {
   const r = await parseSource(src, lang);
@@ -140,7 +140,7 @@ log.messages.push('x');`);
 
 describe('scan integration', () => {
   it('adds complexity, hits (incl. hidden prompts/*.md), coverage', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'grim-m3-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'codefront-m3-'));
     const w = (rel: string, s: string) => { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), s); };
     w('src/a.ts', 'export function f(x: number) {\n  if (x) {\n    return 1;\n  }\n  return 2;\n}\nexport function g() {\n  return 3;\n}\n');
     w('prompts/system.md', 'You are a bot.\n');

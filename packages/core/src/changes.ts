@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { TreeNode } from '@grim-repo/schema';
+import type { TreeNode } from '@codefront/schema';
 import { listBranches } from './remote.js';
 
 const exec = promisify(execFile);

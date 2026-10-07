@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { safeFilePath } from '../src/safe';
 
-const root = mkdtempSync(path.join(tmpdir(), 'grim-safe-'));
+const root = mkdtempSync(path.join(tmpdir(), 'codefront-safe-'));
 mkdirSync(path.join(root, 'src'));
 writeFileSync(path.join(root, 'src/a.ts'), 'x');
-const outside = mkdtempSync(path.join(tmpdir(), 'grim-out-'));
+const outside = mkdtempSync(path.join(tmpdir(), 'codefront-out-'));
 writeFileSync(path.join(outside, 'secret'), 's');
 symlinkSync(path.join(outside, 'secret'), path.join(root, 'src/link'));
 const allowed = new Set(['src/a.ts', 'src/link', '../secret']);

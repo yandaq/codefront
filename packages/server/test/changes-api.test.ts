@@ -9,8 +9,8 @@ const node20 = Number(process.versions.node.split('.')[0]) >= 20;
 describe.skipIf(!node20)('changes API arg validation', () => {
   let srv: { close: () => Promise<void> }, base: string, dir: string;
   beforeAll(async () => {
-    process.env.GRIM_REPO_HOME = mkdtempSync(path.join(tmpdir(), 'grim-api-home-'));
-    dir = mkdtempSync(path.join(tmpdir(), 'grim-api-'));
+    process.env.CODEFRONT_HOME = mkdtempSync(path.join(tmpdir(), 'codefront-api-home-'));
+    dir = mkdtempSync(path.join(tmpdir(), 'codefront-api-'));
     const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
     writeFileSync(path.join(dir, 'a.ts'), 'export const a = 1;\n');
@@ -40,7 +40,7 @@ describe.skipIf(!node20)('changes API arg validation', () => {
     expect((await get('/api/diff', { root: '/', from: 'main', to: 'main' })).status).toBe(404);
   });
   it('returns an empty HEAD page for an unborn repository but still rejects unknown refs', async () => {
-    const unborn = mkdtempSync(path.join(tmpdir(), 'grim-api-unborn-'));
+    const unborn = mkdtempSync(path.join(tmpdir(), 'codefront-api-unborn-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: unborn });
     writeFileSync(path.join(unborn, 'README.md'), '# Unborn\n');
     expect((await fetch(`${base}/api/scan?path=${encodeURIComponent(unborn)}`)).status).toBe(200);

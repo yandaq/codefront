@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { NodeChange } from './layers';
 import { Application, Container, Graphics, NineSliceSprite, Texture } from 'pixi.js';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
-import type { Snapshot, TreeNode } from '@grim-repo/schema';
+import type { Snapshot, TreeNode } from '@codefront/schema';
 import type { HitCounts, Painter } from './layers';
 import type { PinState } from './LayerDock';
 import type { Edge } from './coupling';
