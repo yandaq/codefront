@@ -45,6 +45,8 @@ codefront /path/to/repository
 
 The CLI starts a server on a free loopback port and opens the UI in your browser.
 
+To update a global install, run `codefront update`. A globally installed copy checks npm at most once a day and prints a one-line notice when a newer version is available. Set `CODEFRONT_NO_UPDATE_CHECK=1` to turn the check off; it is also skipped in CI and under `npx`, which already runs the latest version.
+
 ## Building from source
 
 ### Requirements
@@ -101,7 +103,7 @@ The CLI package bundles the server, core scanner, schema, and built web UI:
 ```sh
 cd packages/cli
 npm pack
-npx ./codefront-0.1.0.tgz --no-open /path/to/repository
+npx ./codefront-0.1.1.tgz --no-open /path/to/repository
 ```
 
 ## Using the UI

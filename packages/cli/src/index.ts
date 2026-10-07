@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { scanTarget, isGitUrl } from '@codefront/core';
+import { currentVersion, notifyIfOutdated, runUpdate } from './update.js';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -20,9 +21,18 @@ if (flag('help') || flag('h')) {
   console.log(`Usage:
   codefront [path|git-url] [--no-open] [--port N]     start the local UI
   codefront scan <path|git-url> [--out snapshot.json] [--ref branch] [--no-cache] [--no-docs]
-                                                       headless scan to a portable JSON snapshot`);
+                                                       headless scan to a portable JSON snapshot
+  codefront update                                     install the latest version from npm
+  codefront --version                                  print the installed version`);
   process.exit(0);
 }
+
+if (flag('version') || flag('v')) {
+  console.log(currentVersion());
+  process.exit(0);
+}
+
+if (positional[0] === 'update' || flag('update')) process.exit(await runUpdate());
 
 if (positional[0] === 'scan') {
   const target = asTarget(positional[1]);
@@ -49,3 +59,4 @@ const { address } = await startServer({ port: port ? Number(port) : 0, defaultPa
 const url = `${address}/?path=${encodeURIComponent(target)}`;
 console.log(`codefront running at ${url}\nPress Ctrl+C to stop.`);
 if (!flag('no-open')) (await import('open')).default(url).catch(() => {});
+void notifyIfOutdated();
